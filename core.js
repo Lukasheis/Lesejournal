@@ -619,7 +619,7 @@ export function defaultSettings() {
 }
 
 export function emptyData() {
-  return { version: DATA_VERSION, books: [], sessions: [], quotes: [], settings: defaultSettings(), activeSession: null };
+  return { version: DATA_VERSION, books: [], sessions: [], quotes: [], settings: defaultSettings(), activeSession: null, club: emptyClub() };
 }
 
 export function migrate(raw) {
@@ -632,6 +632,7 @@ export function migrate(raw) {
     quotes: Array.isArray(raw.quotes) ? raw.quotes : [],
     settings: Object.assign(base.settings, raw.settings || {}),
     activeSession: raw.activeSession || null,
+    club: Object.assign(emptyClub(), raw.club || {}),
   };
   if (!Array.isArray(data.settings.reflectionQuestions) || !data.settings.reflectionQuestions.length) {
     data.settings.reflectionQuestions = DEFAULT_QUESTIONS.slice();
@@ -675,4 +676,115 @@ export function elapsedSec(active, now = Date.now()) {
 export function remainingSec(active, now = Date.now()) {
   if (!active || active.mode !== 'countdown') return null;
   return active.targetSec - elapsedSec(active, now);
+}
+
+/* ---------- Buchclub ---------- */
+
+// Ohne 0/O und 1/I, damit man den Code nicht verwechselt
+export const CLUB_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+export function makeClubCode(rand = Math.random) {
+  let c = '';
+  for (let i = 0; i < 8; i++) c += CLUB_CODE_ALPHABET[Math.floor(rand() * CLUB_CODE_ALPHABET.length) % CLUB_CODE_ALPHABET.length];
+  return c;
+}
+
+/** Eingabe wie "abcd-efgh" → "ABCDEFGH" oder null */
+export function normalizeClubCode(input) {
+  const c = String(input || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (c.length !== 8) return null;
+  for (const ch of c) if (!CLUB_CODE_ALPHABET.includes(ch)) return null;
+  return c;
+}
+
+export function fmtClubCode(c) { return c ? `${c.slice(0, 4)}-${c.slice(4)}` : ''; }
+
+/** Seiten pro Tag in den letzten Tagen (für ein Buch) */
+export function pagesPerDay(sessions, bookId, now = Date.now(), days = 7) {
+  const from = now - days * 86400000;
+  let pages = 0;
+  for (const s of sessions) if (s.bookId === bookId && (s.end || s.start) >= from) pages += sessionPages(s);
+  return Math.round(pages / days * 10) / 10;
+}
+
+/** Was ein Mitglied mit der Gruppe teilt (nur das Clubbuch, keine Notizen) */
+export function clubSnapshot(book, sessions, club, now = Date.now()) {
+  const base = {
+    name: String(club.name || '').trim().slice(0, 30) || 'Mitglied',
+    status: String(club.status || '').slice(0, 120),
+    statusAt: club.status ? (club.statusAt || null) : null,
+  };
+  if (!book) return { ...base, bookTitle: null, bookAuthor: null, page: 0, total: 0, progress: 0, pace: 0, finishedAt: null, rating: null, verdict: '' };
+  const finished = book.status === 'finished';
+  return {
+    ...base,
+    bookTitle: String(book.title || '').slice(0, 120),
+    bookAuthor: String(book.author || '').slice(0, 80) || null,
+    page: finished ? (Number(book.totalPages) || 0) : (Number(book.currentPage) || 0),
+    total: Number(book.totalPages) || 0,
+    progress: Math.round(bookProgress(book) * 1000) / 1000,
+    pace: pagesPerDay(sessions, book.id, now),
+    finishedAt: finished ? (book.finishedAt || now) : null,
+    rating: finished && book.rating && book.rating.overall ? book.rating.overall : null,
+    verdict: finished ? String(club.verdict || '').slice(0, 280) : '',
+  };
+}
+
+/** Rennen: Fertige zuerst (wer zuerst fertig war), dann nach Fortschritt, dann nach Tempo */
+export function clubRace(members) {
+  const rows = members.map(m => {
+    const progress = m.finishedAt ? 1 : Math.min(1, Math.max(0, Number(m.progress) || 0));
+    return { ...m, progress, finished: !!m.finishedAt, noBook: !m.bookTitle, pct: Math.round(progress * 100) };
+  });
+  rows.sort((a, b) => {
+    if (a.noBook !== b.noBook) return a.noBook ? 1 : -1;
+    if (a.finished && b.finished) return a.finishedAt - b.finishedAt;
+    if (a.finished !== b.finished) return a.finished ? -1 : 1;
+    if (b.progress !== a.progress) return b.progress - a.progress;
+    return (b.pace || 0) - (a.pace || 0);
+  });
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return rows;
+}
+
+/** Treffen: Tage bis dahin und wie weit man heute sein sollte (Soll-Linie) */
+export function meetingInfo(group, now = Date.now()) {
+  if (!group || !group.meetingDate) return null;
+  const meet = dayKeyToDate(group.meetingDate).getTime();
+  const days = Math.round((meet - startOfDay(now)) / 86400000);
+  const start = Number(group.roundStart) || now;
+  let target = null;
+  if (meet > start) target = Math.min(1, Math.max(0, (now - start) / (meet - start)));
+  return { date: meet, days, past: days < 0, target };
+}
+
+export function fmtDaysUntil(days) {
+  if (days === 0) return 'heute';
+  if (days === 1) return 'morgen';
+  if (days === -1) return 'gestern';
+  if (days < 0) return `vor ${-days} Tagen`;
+  return `in ${days} Tagen`;
+}
+
+export function timeAgo(ts, now = Date.now()) {
+  if (!ts) return '';
+  const min = Math.floor((now - ts) / 60000);
+  if (min < 1) return 'gerade eben';
+  if (min < 60) return `vor ${min} Min.`;
+  const h = Math.floor(min / 60);
+  if (h < 24 && dayKey(ts) === dayKey(now)) return `vor ${h} Std.`;
+  const d = Math.round((startOfDay(now) - startOfDay(ts)) / 86400000);
+  if (d === 1) return 'gestern';
+  if (d < 7) return `vor ${d} Tagen`;
+  return fmtDate(ts, { year: false });
+}
+
+/** Herzen für den aktuellen Status eines Mitglieds */
+export function heartsFor(hearts, toUid, statusAt, myUid) {
+  const list = hearts.filter(h => h.to === toUid && h.statusAt === statusAt);
+  return { count: list.length, mine: list.some(h => h.from === myUid) };
+}
+
+export function emptyClub() {
+  return { code: null, name: '', bookId: null, status: '', statusAt: null, verdict: '' };
 }

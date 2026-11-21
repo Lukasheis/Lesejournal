@@ -15,6 +15,7 @@ VIEWS.more = {
     const dark = isDark(s);
     const newQuotes = s.quotesExportedAt ? d.quotes.filter(q => q.createdAt > s.quotesExportedAt).length : d.quotes.length;
     return `
+    <header class="page-head sub"><button class="back" data-act="back">${icon('chevronLeft')}Zurück</button></header>
     <header class="page-head"><div><p class="eyebrow">Einstellungen</p><h1>Mehr</h1></div></header>
 
     <h2 class="group-title">Erscheinungsbild</h2>

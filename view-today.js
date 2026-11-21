@@ -2,7 +2,7 @@
 import * as store from './store.js';
 import { greeting, fmtDate, fmtNum, fmtClock, dayKey, dailyTotals, streaks, bookProgress, quoteOfDay, quoteSource, backupDue, elapsedSec, remainingSec, addDays, startOfDay, WEEKDAYS_SHORT, WEEKDAYS, MONTHS } from './core.js';
 import { icon } from './icons.js';
-import { esc, A, coverHtml } from './ui.js';
+import { esc, A, coverHtml, moreBtn } from './ui.js';
 import { ring } from './charts.js';
 import { VIEWS, nav, render } from './nav.js';
 import { startSessionSheet, openTimer } from './session.js';
@@ -37,6 +37,7 @@ VIEWS.today = {
     <header class="page-head">
       <div><p class="eyebrow">${WEEKDAYS[today.getDay()]}, ${today.getDate()}. ${MONTHS[today.getMonth()]}</p>
       <h1>${greeting(now)}</h1></div>
+      ${moreBtn()}
     </header>
 
     ${backupDue(d.settings, store.hasContent(), now) ? `
@@ -117,5 +118,5 @@ Object.assign(A, {
   nextQuote: () => { quoteOffset++; render(); },
   allQuotes: () => nav.push('quotes', {}),
   goBooks: () => nav.tab('books'),
-  goBackup: () => { nav.tab('more'); setTimeout(() => document.getElementById('backup')?.scrollIntoView({ behavior: 'smooth' }), 100); },
+  goBackup: () => { nav.push('more'); setTimeout(() => document.getElementById('backup')?.scrollIntoView({ behavior: 'smooth' }), 100); },
 });

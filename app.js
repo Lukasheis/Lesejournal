@@ -11,6 +11,8 @@ import './view-books.js';
 import './view-book.js';
 import './view-stats.js';
 import './view-more.js';
+import './view-club.js';
+import { init as initClub } from './club.js';
 
 /* ---------- Allgemeine Bedienelemente ---------- */
 
@@ -55,7 +57,7 @@ function tabbar() {
   const t = (id, ic, label) => `<button data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`;
   return `${t('today', 'today', 'Heute')}${t('books', 'books', 'Bücher')}
     <button class="fab" data-act="plus" aria-label="Neu">${icon('plus')}</button>
-    ${t('stats', 'stats', 'Statistik')}${t('more', 'more', 'Mehr')}`;
+    ${t('club', 'club', 'Club')}${t('stats', 'stats', 'Statistik')}`;
 }
 
 /* ---------- Start ---------- */
@@ -67,6 +69,7 @@ function boot() {
   render({ top: true });
   store.onChange(() => render());
   store.persistStorage();
+  initClub();
   if (data.activeSession) { resumeTicking(); openTimer(); }
   requestAnimationFrame(() => document.body.classList.add('ready'));
 

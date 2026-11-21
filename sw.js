@@ -1,12 +1,12 @@
 // sw.js – network-first: bei Netz immer die neueste Version, offline aus dem Cache.
 // Bei JEDEM Update die Nummer im Cache-Namen hochzählen!
-const CACHE = 'lesejournal-v1';
+const CACHE = 'lesejournal-v4';
 
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png',
   'app.js', 'core.js', 'store.js', 'ui.js', 'icons.js', 'nav.js', 'theme.js', 'charts.js',
   'scan.js', 'session.js', 'sheets.js', 'view-today.js', 'view-books.js', 'view-book.js',
-  'view-stats.js', 'view-more.js',
+  'view-stats.js', 'view-more.js', 'view-club.js', 'club.js', 'club-config.js',
 ];
 
 self.addEventListener('install', e => {
@@ -27,7 +27,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
   // Bibliotheken vom CDN (feste Versionen) einmal laden und dann aus dem Cache
-  const cdn = url.hostname === 'cdn.jsdelivr.net';
+  const cdn = url.hostname === 'cdn.jsdelivr.net' || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/'));
   if (!sameOrigin && !cdn) return;
 
   if (cdn) {

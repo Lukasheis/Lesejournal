@@ -84,9 +84,10 @@ export function toast(msg, { icon: ic = 'check' } = {}) {
   let el = $('#toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
   el.innerHTML = `${icon(ic)}<span>${esc(msg)}</span>`;
+  el.classList.toggle('long', String(msg).length > 38);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  toastTimer = setTimeout(() => el.classList.remove('show'), String(msg).length > 38 ? 4500 : 2400);
 }
 
 export function confirmDialog({ title, text = '', ok = 'OK', cancel = 'Abbrechen', danger = false }) {
@@ -229,4 +230,9 @@ export function runShortcut(name, text = '') {
   const a = document.createElement('a');
   a.href = url;
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+/** Zahnrad oben rechts → Einstellungen („Mehr“) */
+export function moreBtn() {
+  return `<button class="round" data-act="openMore" aria-label="Einstellungen">${icon('settings')}</button>`;
 }

@@ -2,7 +2,7 @@
 import * as store from './store.js';
 import { fmtNum, fmtDate, bookProgress, quoteSource } from './core.js';
 import { icon } from './icons.js';
-import { esc, A, coverHtml, segmented, starsView, hydratePhotos } from './ui.js';
+import { esc, A, coverHtml, segmented, starsView, hydratePhotos, moreBtn } from './ui.js';
 import { VIEWS, nav, render } from './nav.js';
 import { bookForm, quoteSheet } from './sheets.js';
 
@@ -30,7 +30,7 @@ VIEWS.books = {
     const header = `
     <header class="page-head">
       <div><p class="eyebrow">${fmtNum(d.books.length)} ${d.books.length === 1 ? 'Buch' : 'Bücher'}</p><h1>Bücher</h1></div>
-      <button class="round accent" data-act="addBook" aria-label="Buch hinzufügen">${icon('plus')}</button>
+      <div class="head-btns"><button class="round accent" data-act="addBook" aria-label="Buch hinzufügen">${icon('plus')}</button>${moreBtn()}</div>
     </header>
     <div class="search">${icon('search')}<input id="book-search" class="input" type="search" placeholder="Titel oder Autor:in suchen" value="${esc(search)}"></div>`;
     const results = `

@@ -2,7 +2,7 @@
 import * as store from './store.js';
 import { fmtNum, fmtDate, fmtDuration, streaks, pagesPerHour, weeklyTotals, monthlyTotals, heatmap, yearGoalStatus, yearReview, sessionPages, totalSeconds, quoteSource, MONTHS, MONTHS_SHORT } from './core.js';
 import { icon } from './icons.js';
-import { esc, A, coverHtml, starsView } from './ui.js';
+import { esc, A, coverHtml, starsView, moreBtn } from './ui.js';
 import { ring, bars, heatmapSvg } from './charts.js';
 import { VIEWS, nav, render } from './nav.js';
 
@@ -43,6 +43,7 @@ VIEWS.stats = {
     return `
     <header class="page-head">
       <div><p class="eyebrow">Dein Lesen in Zahlen</p><h1>Statistik</h1></div>
+      ${moreBtn()}
     </header>
     ${ys.length > 1 ? `<div class="chips year-chips">${ys.map(y => `<button class="chip ${y === year ? 'on' : ''}" data-act="setYear" data-y="${y}">${y}</button>`).join('')}</div>` : ''}
 
@@ -140,5 +141,5 @@ VIEWS.review = {
 Object.assign(A, {
   setYear: el => { year = Number(el.dataset.y); render(); },
   openReview: () => nav.push('review', { y: year }),
-  editGoals: () => { nav.tab('more'); setTimeout(() => document.getElementById('goals')?.scrollIntoView({ behavior: 'smooth' }), 100); },
+  editGoals: () => { nav.push('more'); setTimeout(() => document.getElementById('goals')?.scrollIntoView({ behavior: 'smooth' }), 100); },
 });
