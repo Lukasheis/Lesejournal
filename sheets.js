@@ -214,7 +214,7 @@ function bookSelect(id, selected, filter = () => true) {
   return `<select id="${id}" class="input">${books.map(b => `<option value="${b.id}" ${b.id === selected ? 'selected' : ''}>${esc(b.title)}${b.author ? ' – ' + esc(b.author) : ''}</option>`).join('')}</select>`;
 }
 
-export function quoteSheet({ bookId = null, quoteId = null }) {
+export function quoteSheet({ bookId = null, quoteId = null, title = null, onSaved = null }) {
   const q = quoteId ? store.get().quotes.find(x => x.id === quoteId) : null;
   const d = store.get();
   const active = d.activeSession;
@@ -222,13 +222,13 @@ export function quoteSheet({ bookId = null, quoteId = null }) {
   const sel = store.book(selected);
   let fav = q ? !!q.fav : false;
   const html = `
-    ${sheetHead(q ? 'Zitat bearbeiten' : 'Zitat notieren', { action: 'quoteSave', actionLabel: 'Sichern' })}
+    ${sheetHead(title || (q ? 'Zitat bearbeiten' : 'Zitat notieren'), { action: 'quoteSave', actionLabel: 'Sichern' })}
     <div class="form">
       <label class="lbl" for="q-book">Buch</label>
       ${bookSelect('q-book', selected)}
       <div class="lbl-row"><label class="lbl" for="q-text">Zitat</label>
-        <button class="link small" data-s="ocr">${icon('camera')}Abfotografieren</button></div>
-      <div class="ocr-status" hidden></div>
+        <button class="link small" data-s="dictate">${icon('mic')}Diktieren</button></div>
+      <div class="dictate-hint" hidden>${icon('mic')}<span>Tippe unten auf der Tastatur auf das <b>Mikrofon</b> und sprich das Zitat. Satzzeichen setzt das iPhone meist selbst, sonst sag „Komma“ oder „Punkt“. Zum Beenden nochmal auf das Mikrofon tippen.</span></div>
       <textarea id="q-text" class="input quote-input" rows="6" placeholder="Der Satz, den du nicht vergessen willst …">${esc(q ? q.text : '')}</textarea>
       <div class="row2">
         <div><label class="lbl" for="q-page">Seite</label><input id="q-page" class="input" inputmode="numeric" value="${q && q.page ? q.page : (sel && sel.currentPage) || ''}"></div>
@@ -242,22 +242,15 @@ export function quoteSheet({ bookId = null, quoteId = null }) {
     onMount(root, entry) {
       const $ = s => root.querySelector(s);
       root.addEventListener('togglechange', e => { fav = e.detail.on; });
-      const ocrStatus = $('.ocr-status');
-      const showStatus = t => { ocrStatus.hidden = !t; ocrStatus.innerHTML = t ? `<span class="spinner"></span>${esc(t)}` : ''; };
       root.addEventListener('click', async e => {
         const btn = e.target.closest('[data-s], [data-act="quoteSave"]');
         if (!btn) return;
-        if (btn.dataset.s === 'ocr') {
-          const file = await pickFile('image/*');
-          if (!file) return;
-          try {
-            const text = await ocrText(file, showStatus);
-            const ta = $('#q-text');
-            ta.value = ta.value.trim() ? ta.value.trim() + ' ' + text : text;
-            toast('Text erkannt – kürze ihn auf das Zitat', { icon: 'text' });
-            ta.focus();
-          } catch (err) { toast(err.message || 'Texterkennung fehlgeschlagen', { icon: 'info' }); }
-          finally { showStatus(''); }
+        if (btn.dataset.s === 'dictate') {
+          // Diktieren über das Mikrofon der iPhone-Tastatur: Textfeld öffnen und Hinweis zeigen
+          $('.dictate-hint').hidden = false;
+          const ta = $('#q-text');
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
           return;
         }
         if (btn.dataset.s === 'delete') {
@@ -270,7 +263,8 @@ export function quoteSheet({ bookId = null, quoteId = null }) {
         if (!text) { $('#q-text').focus(); toast('Bitte das Zitat eingeben', { icon: 'info' }); return; }
         const page = parseNum($('#q-page').value);
         const fields = { bookId: $('#q-book').value, text, page: isNaN(page) ? null : page, chapter: $('#q-chap').value.trim(), fav };
-        if (q) store.updateQuote(q.id, fields); else store.addQuote(fields);
+        const saved = q ? (store.updateQuote(q.id, fields), { ...q, ...fields }) : store.addQuote(fields);
+        if (onSaved) onSaved(saved);
         closeSheet(entry);
         toast(q ? 'Zitat gespeichert' : 'Zitat notiert', { icon: 'quote' });
       });

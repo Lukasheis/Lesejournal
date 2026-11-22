@@ -12,7 +12,7 @@ const CACHE_KEY = 'lesejournal.clubcache';
 export const isConfigured = () => !!(FIREBASE_CONFIG && FIREBASE_CONFIG.projectId && FIREBASE_CONFIG.apiKey);
 
 /** Was die Ansicht anzeigt */
-export const live = { group: null, members: [], hearts: [], uid: null, status: 'idle', error: null, updatedAt: null };
+export const live = { group: null, members: [], hearts: [], quotes: [], uid: null, status: 'idle', error: null, updatedAt: null };
 
 let backend = null;
 let connecting = null;
@@ -25,7 +25,7 @@ const listeners = new Set();
 export function onLive(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function emit() {
   if (!demo && info().code && live.group) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ code: info().code, group: live.group, members: live.members, hearts: live.hearts, uid: live.uid, updatedAt: live.updatedAt })); } catch (e) { /* egal */ }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ code: info().code, group: live.group, members: live.members, hearts: live.hearts, quotes: live.quotes, uid: live.uid, updatedAt: live.updatedAt })); } catch (e) { /* egal */ }
   }
   for (const fn of listeners) fn(live);
 }
@@ -37,7 +37,7 @@ export function setInfo(fields) {
   else store.update(d => Object.assign(d.club, fields));
 }
 
-function resetLive() { Object.assign(live, { group: null, members: [], hearts: [], status: 'idle', error: null, updatedAt: null }); }
+function resetLive() { Object.assign(live, { group: null, members: [], hearts: [], quotes: [], status: 'idle', error: null, updatedAt: null }); }
 
 function friendlyError(err) {
   const c = (err && err.code) || '';
@@ -71,13 +71,16 @@ async function firebaseBackend() {
       const ref = F.doc(db, 'groups', code, 'hearts', `${uid}_${to}`);
       return on ? F.setDoc(ref, { from: uid, to, statusAt }) : F.deleteDoc(ref);
     },
+    putQuote: (code, id, data) => F.setDoc(F.doc(db, 'groups', code, 'quotes', id), data),
+    deleteQuote: (code, id) => F.deleteDoc(F.doc(db, 'groups', code, 'quotes', id)),
     watch(code, cb, onErr) {
-      const st = { group: undefined, members: null, hearts: [] };
+      const st = { group: undefined, members: null, hearts: [], quotes: [] };
       const fire = () => { if (st.group !== undefined && st.members) cb({ ...st }); };
       const offs = [
         F.onSnapshot(g(code), s => { st.group = s.exists() ? s.data() : null; fire(); }, onErr),
         F.onSnapshot(F.collection(db, 'groups', code, 'members'), s => { st.members = s.docs.map(d => ({ uid: d.id, ...d.data() })); fire(); }, onErr),
         F.onSnapshot(F.collection(db, 'groups', code, 'hearts'), s => { st.hearts = s.docs.map(d => d.data()); fire(); }, onErr),
+        F.onSnapshot(F.collection(db, 'groups', code, 'quotes'), s => { st.quotes = s.docs.map(d => ({ id: d.id, ...d.data() })); fire(); }, onErr),
       ];
       return () => offs.forEach(f => f());
     },
@@ -95,7 +98,7 @@ function makeDemo() {
     group: { name: 'Buchclub Donnerstag', createdBy: 'anna', createdAt: now - 20 * d, meetingDate: dayKey(addDays(new Date(now), 9).getTime()), meetingNote: '19 Uhr bei Anna', roundStart: now - 14 * d },
     members: [
       m('anna', 'Anna', 271, 31, { status: 'Kann es nicht weglegen!', statusAt: now - 5 * h, updatedAt: now - 40 * 60000 }),
-      m('mira', 'Mira', 384, 42, { progress: 1, finishedAt: now - 2 * d, rating: 4.5, verdict: 'Das Ende hat mich umgehauen. Ich freu mich aufs Treffen!', updatedAt: now - 2 * d }),
+      m('mira', 'Mira', 384, 42, { progress: 1, finishedAt: now - 2 * d, rating: 4.5, updatedAt: now - 2 * d }),
       m('jakob', 'Jakob', 158, 12, { status: 'Kapitel 9 zieht sich etwas …', statusAt: now - 26 * h, updatedAt: now - 26 * h }),
       m('sophie', 'Sophie', 232, 18),
       m('paul', 'Paul', 69, 6, { updatedAt: now - 3 * d }),
@@ -104,9 +107,13 @@ function makeDemo() {
       { from: 'mira', to: 'anna', statusAt: now - 5 * h }, { from: 'sophie', to: 'anna', statusAt: now - 5 * h },
       { from: 'anna', to: 'jakob', statusAt: now - 26 * h },
     ],
+    quotes: [
+      { id: 'anna_1', from: 'anna', name: 'Anna', text: 'Manche Türen öffnen sich erst, wenn man aufhört, an ihnen zu rütteln.', ...book, page: 112, chapter: '7', createdAt: now - 30 * h },
+      { id: 'mira_1', from: 'mira', name: 'Mira', text: 'Der Fluss erinnert sich an alles, was wir vergessen wollen.', ...book, page: 301, chapter: '22', createdAt: now - 3 * h },
+    ],
   };
   let cb = null;
-  const fire = () => cb && setTimeout(() => cb({ group: { ...state.group }, members: state.members.map(x => ({ ...x })), hearts: state.hearts.slice() }), 0);
+  const fire = () => cb && setTimeout(() => cb({ group: { ...state.group }, members: state.members.map(x => ({ ...x })), hearts: state.hearts.slice(), quotes: state.quotes.map(x => ({ ...x })) }), 0);
   return {
     info: { code: 'DEMO2345', name: 'Du', bookId: null, status: '', statusAt: null, verdict: '' },
     uid: 'me',
@@ -120,6 +127,8 @@ function makeDemo() {
       if (on) state.hearts.push({ from: 'me', to, statusAt });
       fire();
     },
+    async putQuote(code, id, data) { state.quotes = state.quotes.filter(x => x.id !== id).concat({ id, ...data }); fire(); },
+    async deleteQuote(code, id) { state.quotes = state.quotes.filter(x => x.id !== id); fire(); },
     watch(code, fn) { cb = fn; fire(); return () => { cb = null; }; },
   };
 }
@@ -246,3 +255,23 @@ export async function renameGroup(name) { await (await connect()).updateGroup(in
 export async function toggleHeart(toUid, statusAt, on) { await (await connect()).setHeart(info().code, toUid, statusAt, on); }
 
 export const isAdmin = () => !!(live.group && live.uid && live.group.createdBy === live.uid);
+
+/** Eines meiner Zitate im Club teilen (gleiches Zitat = gleicher Eintrag, keine Doppelten) */
+export async function shareQuote(q) {
+  const b = await connect();
+  const i = info();
+  const book = store.book(q.bookId);
+  const page = Number(q.page);
+  await b.putQuote(i.code, `${b.uid}_${q.id}`, {
+    from: b.uid, localId: q.id,
+    name: String(i.name || 'Mitglied').slice(0, 30),
+    text: String(q.text || '').trim().slice(0, 600),
+    bookTitle: book ? String(book.title || '').slice(0, 120) : '',
+    bookAuthor: book ? String(book.author || '').slice(0, 80) : '',
+    page: page > 0 ? page : null,
+    chapter: String(q.chapter || '').slice(0, 20),
+    createdAt: Date.now(),
+  });
+}
+
+export async function deleteClubQuote(id) { await (await connect()).deleteQuote(info().code, id); }

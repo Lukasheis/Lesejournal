@@ -126,25 +126,26 @@ Object.assign(A, {
     'Einstellungen → <b>Fokus</b> → <b>+</b> → <b>Lesen</b> anlegen (Mitteilungen stummschalten, erlaubte Personen nach Wunsch).',
     'App <b>Kurzbefehle</b> öffnen → <b>+</b> → Name: <b>Lesezeit</b>.',
     'Aktion <b>Fokus festlegen</b> hinzufügen → <b>Lesen</b> → <b>Einschalten</b> → „Bis“: <b>Ausgeschaltet</b>.',
-    'Optional für den Countdown: Aktion <b>Wenn</b> → „Kurzbefehleingabe“ <b>ist größer als</b> 0 → darin <b>Timer starten</b> mit „Kurzbefehleingabe“ <b>Minuten</b>.',
+    'Optional für den Countdown: Aktion <b>Zahl</b> → Variable <b>Kurzbefehleingabe</b>. Dann <b>Wenn</b> → <b>Zahl</b> <b>ist größer als</b> 0. <b>Timer starten</b> zwischen „Wenn“ und „Sonst“ ziehen, Dauer: Variable <b>Zahl</b>, <b>Minuten</b>. Genaue Schritte: ANLEITUNG 3.2.',
     'Zweiten Kurzbefehl <b>Lesezeit Ende</b> anlegen: <b>Fokus festlegen</b> → Lesen → <b>Ausschalten</b>.',
     'Hier oben <b>Fokus per Kurzbefehl</b> einschalten und mit <b>Kurzbefehl testen</b> prüfen.',
     'Nach dem Start kommst du über <b>◀ oben links</b> oder durch Wischen zurück in die App.',
   ]),
   helpQuotes: () => helpSheet('Zitate als Mitteilung', [
-    'Hier auf <b>Zitate für Kurzbefehl sichern</b> tippen → <b>In „Dateien“ sichern</b> → <b>iCloud Drive → Shortcuts</b> → Sichern (vorhandene Datei ersetzen).',
+    'Hier auf <b>Zitate für Kurzbefehl sichern</b> tippen → <b>In „Dateien“ sichern</b> → <b>iCloud Drive → Kurzbefehle</b> (oder „Shortcuts“) → Sichern. Fragt das iPhone: <b>Ersetzen</b> wählen.',
     'App <b>Kurzbefehle</b> → <b>+</b> → Name: <b>Zitat des Tages</b>.',
-    'Aktion <b>Datei abrufen</b> → Ordner <b>Shortcuts</b>, Pfad <b>Zitate.txt</b>, „Fehler, wenn nicht gefunden“ aus.',
-    'Aktion <b>Text teilen</b> → bei <b>Neue Zeilen</b>.',
+    'Aktion <b>Datei aus Ordner abrufen</b> → Ordner so lassen, statt „beispiel.txt“ <b>Zitate.txt</b> eintippen, über den Pfeil „Fehler, wenn nicht gefunden“ aus.',
+    'Aktion <b>Text aufteilen</b> (Suche: „aufteilen“, je nach iOS auch „teilen“ oder „trennen“) → <b>Neue Zeilen</b>. Nicht das Teilen-Symbol.',
     'Aktion <b>Objekt aus Liste abrufen</b> → <b>Zufälliges Objekt</b>.',
-    'Aktion <b>Mitteilung anzeigen</b> → Text: „Objekt aus Liste“, Titel: <b>Zitat des Tages</b>.',
-    'Tab <b>Automation</b> → <b>+</b> → <b>Tageszeit</b> (z. B. 9:00, täglich) → <b>Sofort ausführen</b> → Kurzbefehl <b>Zitat des Tages</b>. Für mehrere Zeiten weitere Automationen anlegen.',
+    'Aktion <b>Mitteilung anzeigen</b> → „Hallo Welt!“ löschen und über der Tastatur <b>Objekt aus Liste</b> wählen. Über den Pfeil als Titel <b>Zitat des Tages</b> eintragen.',
+    'Tab <b>Automation</b> → <b>+</b> → <b>Tageszeit</b> (z. B. 9:00, täglich) → <b>Sofort ausführen</b>, „Bei Ausführung benachrichtigen“ aus → Weiter → <b>Zitat des Tages</b>. Für mehrere Zeiten weitere Automationen anlegen.',
     'Nach neuen Zitaten einfach Schritt 1 wiederholen.',
+    'Ganz genaue Schritte und eine Fehlerliste stehen in der ANLEITUNG, Abschnitt 4.',
   ]),
   exportQuotes: async () => {
     const d = store.get();
     if (!d.quotes.length) { toast('Noch keine Zitate vorhanden', { icon: 'info' }); return; }
-    const file = new File([quotesToText(d.quotes, d.books)], 'Zitate.txt', { type: 'text/plain' });
+    const file = new File([quotesToText(d.quotes, d.books).trimEnd()], 'Zitate.txt', { type: 'text/plain' });
     if (await shareOrDownload(file, 'Zitate')) { store.setSetting('quotesExportedAt', Date.now()); toast('Zitate gesichert'); }
   },
   editQuestion: el => {

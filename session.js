@@ -1,6 +1,6 @@
 // session.js – Lese-Timer (Stoppuhr/Countdown), Fokus-Kurzbefehl, Session beenden
 import * as store from './store.js';
-import { elapsedSec, remainingSec, fmtClock, fmtDuration, fmtNum, parseNum, maxChapterNumber } from './core.js';
+import { elapsedSec, remainingSec, fmtClock, fmtDuration, fmtNum, parseNum, maxChapterNumber, COUNTDOWN_PRESETS, splitMinutes, countdownMinutes } from './core.js';
 import { icon } from './icons.js';
 import { esc, openSheet, closeSheet, sheetHead, segmented, toast, coverHtml, hydratePhotos, runShortcut, confirmDialog } from './ui.js';
 import { ring } from './charts.js';
@@ -45,6 +45,7 @@ export function startSessionSheet(bookId = null) {
   let selected = bookId || candidates[0].id;
   let mode = d.settings.timerMode || 'stopwatch';
   let minutes = d.settings.defaultCountdownMin || 30;
+  let custom = !COUNTDOWN_PRESETS.includes(minutes);
 
   const bookList = () => candidates.map(b => `
     <button class="pick ${b.id === selected ? 'on' : ''}" data-s="book" data-id="${b.id}">
@@ -61,10 +62,15 @@ export function startSessionSheet(bookId = null) {
       <label class="lbl">Art</label>
       ${segmented('mode', [['stopwatch', 'Stoppuhr'], ['countdown', 'Countdown']], mode)}
       <div class="countdown-opts" ${mode === 'countdown' ? '' : 'hidden'}>
-        <div class="chips">${[15, 20, 30, 45, 60, 90].map(m => `<button class="chip ${m === minutes ? 'on' : ''}" data-s="min" data-v="${m}">${m} min</button>`).join('')}</div>
+        <div class="chips">${COUNTDOWN_PRESETS.map(m => `<button class="chip ${m === minutes && !custom ? 'on' : ''}" data-s="min" data-v="${m}">${m} min</button>`).join('')}
+          <button class="chip ${custom ? 'on' : ''}" data-s="custom">${icon('edit')}Eigene</button></div>
+        <div class="custom-dur" ${custom ? '' : 'hidden'}>
+          <label class="dur-field"><input id="dur-h" class="input" inputmode="numeric" maxlength="2" value="${splitMinutes(minutes).h || ''}" placeholder="0"><span>Std.</span></label>
+          <label class="dur-field"><input id="dur-m" class="input" inputmode="numeric" maxlength="3" value="${splitMinutes(minutes).m || ''}" placeholder="0"><span>Min.</span></label>
+        </div>
       </div>
       ${d.settings.focusShortcut ? `<p class="note">${icon('focus')}Beim Start öffnet sich kurz der Kurzbefehl „${esc(d.settings.shortcutStart)}“ für den Fokus „Lesen“. Danach oben links auf „Zurück“ tippen.</p>`
-        : `<p class="note">${icon('focus')}Tipp: Schalte den Fokus „Lesen“ ein oder richte unter Mehr → Lese-Timer den Kurzbefehl ein.</p>`}
+        : `<p class="note">${icon('focus')}Tipp: Schalte den Fokus „Lesen“ ein oder richte über das Zahnrad → Lese-Timer den Kurzbefehl ein.</p>`}
       <button class="btn primary big" data-s="go">${icon('play')}Los geht's</button>
     </div>`;
 
@@ -80,10 +86,18 @@ export function startSessionSheet(bookId = null) {
         if (b.dataset.s === 'book') {
           selected = b.dataset.id;
           root.querySelectorAll('.pick').forEach(p => p.classList.toggle('on', p.dataset.id === selected));
-        } else if (b.dataset.s === 'min') {
-          minutes = Number(b.dataset.v);
-          root.querySelectorAll('[data-s="min"]').forEach(c => c.classList.toggle('on', c === b));
+        } else if (b.dataset.s === 'min' || b.dataset.s === 'custom') {
+          custom = b.dataset.s === 'custom';
+          if (!custom) minutes = Number(b.dataset.v);
+          root.querySelectorAll('[data-s="min"], [data-s="custom"]').forEach(c => c.classList.toggle('on', c === b));
+          root.querySelector('.custom-dur').hidden = !custom;
+          if (custom) setTimeout(() => root.querySelector('#dur-m').focus(), 50);
         } else if (b.dataset.s === 'go') {
+          if (mode === 'countdown' && custom) {
+            const v = countdownMinutes(root.querySelector('#dur-h').value, root.querySelector('#dur-m').value);
+            if (!v) { toast('Bitte eine Dauer zwischen 1 Minute und 12 Stunden eingeben', { icon: 'info' }); return; }
+            minutes = v;
+          }
           unlockAudio();
           const book = store.book(selected);
           store.update(dd => {

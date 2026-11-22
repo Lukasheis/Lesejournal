@@ -1,6 +1,6 @@
 // view-today.js – Startseite "Heute"
 import * as store from './store.js';
-import { greeting, fmtDate, fmtNum, fmtClock, dayKey, dailyTotals, streaks, bookProgress, quoteOfDay, quoteSource, backupDue, elapsedSec, remainingSec, addDays, startOfDay, WEEKDAYS_SHORT, WEEKDAYS, MONTHS } from './core.js';
+import { greeting, fmtDate, fmtNum, fmtClock, dayKey, dailyTotals, streaks, bookProgress, quoteOfDay, quoteSource, backupDue, elapsedSec, remainingSec, addDays, startOfDay, WEEKDAYS_SHORT, WEEKDAYS, MONTHS, pendingChanges, APP_VERSION } from './core.js';
 import { icon } from './icons.js';
 import { esc, A, coverHtml, moreBtn } from './ui.js';
 import { ring } from './charts.js';
@@ -39,6 +39,8 @@ VIEWS.today = {
       <h1>${greeting(now)}</h1></div>
       ${moreBtn()}
     </header>
+
+    ${changesCard(d.settings)}
 
     ${backupDue(d.settings, store.hasContent(), now) ? `
       <button class="banner warn" data-act="goBackup">${icon('shield')}<span><strong>Zeit für ein Backup</strong><small>${d.settings.lastBackup ? 'Letztes Backup am ' + fmtDate(d.settings.lastBackup) : 'Du hast noch kein Backup erstellt'}</small></span>${icon('chevronRight')}</button>` : ''}
@@ -120,3 +122,23 @@ Object.assign(A, {
   goBooks: () => nav.tab('books'),
   goBackup: () => { nav.push('more'); setTimeout(() => document.getElementById('backup')?.scrollIntoView({ behavior: 'smooth' }), 100); },
 });
+
+/* ---------- Was ist neu ---------- */
+
+function changesCard(settings) {
+  const list = pendingChanges(settings.seenChangesVersion);
+  if (!list.length) return '';
+  const items = list.flatMap(e => e.items);
+  return `<section class="news-card">
+    <div class="news-blobs"><i></i><i></i></div>
+    <div class="news-head">${icon('sparkle')}<strong>Neu in der App</strong><small>Version ${esc(APP_VERSION)}</small></div>
+    <ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    <button class="btn news-ok" data-act="changesSeen">${icon('check')}Gelesen</button>
+  </section>`;
+}
+
+A.changesSeen = () => {
+  const el = document.querySelector('.news-card');
+  const done = () => store.setSetting('seenChangesVersion', APP_VERSION);
+  if (el) { el.classList.add('bye'); setTimeout(done, 280); } else done();
+};

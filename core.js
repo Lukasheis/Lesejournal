@@ -1,6 +1,6 @@
 // core.js – reine Rechenlogik ohne DOM (mit jsc testbar)
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.2.0';
 export const DATA_VERSION = 1;
 
 /* ---------- Zahlen & Datum (Deutsch/Österreich) ---------- */
@@ -615,6 +615,7 @@ export function defaultSettings() {
     reflectionQuestions: DEFAULT_QUESTIONS.slice(),
     lastBackup: null,
     quotesExportedAt: null,
+    seenChangesVersion: null,
   };
 }
 
@@ -726,7 +727,7 @@ export function clubSnapshot(book, sessions, club, now = Date.now()) {
     pace: pagesPerDay(sessions, book.id, now),
     finishedAt: finished ? (book.finishedAt || now) : null,
     rating: finished && book.rating && book.rating.overall ? book.rating.overall : null,
-    verdict: finished ? String(club.verdict || '').slice(0, 280) : '',
+    verdict: '', // Das Fazit bleibt privat – der Club sieht nur die Sterne
   };
 }
 
@@ -787,4 +788,54 @@ export function heartsFor(hearts, toUid, statusAt, myUid) {
 
 export function emptyClub() {
   return { code: null, name: '', bookId: null, status: '', statusAt: null, verdict: '' };
+}
+
+/* ---------- Countdown-Dauer ---------- */
+
+export const COUNTDOWN_PRESETS = [15, 20, 30, 45, 60, 90];
+
+/** Stunden + Minuten aus Eingabefeldern → Minuten (1 bis 12 Stunden) oder null */
+export function countdownMinutes(hours, minutes) {
+  const h = parseNum(String(hours ?? '').trim() || '0');
+  const m = parseNum(String(minutes ?? '').trim() || '0');
+  if (isNaN(h) || isNaN(m) || h < 0 || m < 0) return null;
+  const total = Math.round(h * 60 + m);
+  return total >= 1 && total <= 720 ? total : null;
+}
+
+export function splitMinutes(total) { return { h: Math.floor(total / 60), m: total % 60 }; }
+
+export function fmtMinutes(total) {
+  const { h, m } = splitMinutes(total);
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/* ---------- Was ist neu ---------- */
+
+export const CHANGELOG = [
+  { version: '1.2.0', items: [
+    'Countdown beliebig lang: Unter „Eigene“ Stunden und Minuten eingeben.',
+    'Zitate diktieren statt abfotografieren: Auf „Diktieren“ tippen und ins Mikrofon der Tastatur sprechen.',
+    'Zwischen Heute, Bücher, Club und Statistik einfach nach links oder rechts wischen.',
+    'Zitate im Club teilen und die Zitate der anderen in die eigene Liste übernehmen.',
+    'Im Club sehen die anderen nur noch deine Sterne. Dein Fazit bleibt privat.',
+  ] },
+  { version: '1.1.0', items: [
+    'Neuer Tab „Club“: Lest gemeinsam mit eurem Buchclub, mit Lese-Wettrennen, Treffen-Countdown und Status.',
+    'Die App reicht jetzt bis ganz nach oben.',
+    'Die Einstellungen („Mehr“) findest du über das Zahnrad oben rechts.',
+  ] },
+];
+
+/** "1.10.0" > "1.9.2" */
+export function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map(Number), pb = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0 ? 1 : -1; }
+  return 0;
+}
+
+/** Neuerungen, die noch nicht als gelesen markiert sind (neueste zuerst) */
+export function pendingChanges(seenVersion, current = APP_VERSION, log = CHANGELOG) {
+  return log.filter(e => compareVersions(e.version, seenVersion || '1.0.0') > 0 && compareVersions(e.version, current) <= 0);
 }

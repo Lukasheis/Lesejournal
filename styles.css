@@ -839,3 +839,63 @@ input[type="date"].input { min-height: 48px; }
 .page-head > div:first-child { min-width: 0; }
 .page-head h1 { overflow-wrap: anywhere; }
 .page-head h1.long { font-size: 28px; }
+
+/* ---------- Eigene Countdown-Dauer ---------- */
+.custom-dur { display: flex; gap: 10px; margin-top: 10px; }
+.dur-field { flex: 1; position: relative; }
+.dur-field .input { text-align: center; font-size: 22px; font-weight: 700; padding-right: 48px; font-variant-numeric: tabular-nums; }
+.dur-field span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--text-3); font-size: 15px; font-weight: 600; pointer-events: none; }
+.chip .ic { width: 15px; height: 15px; vertical-align: -2px; margin-right: 4px; }
+
+/* ---------- Diktieren ---------- */
+.dictate-hint { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; color: var(--text-2); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); animation: fade .3s ease; }
+.dictate-hint .ic { color: var(--accent-text); width: 20px; height: 20px; flex: none; margin-top: 1px; }
+.dictate-hint b { color: var(--text); }
+
+/* ---------- Tab-Wechsel per Wischen ---------- */
+#view.anim-slide-l { animation: slidel .32s var(--ease); }
+#view.anim-slide-r { animation: slider .32s var(--ease); }
+@keyframes slidel { from { opacity: 0; transform: translateX(40px); } }
+@keyframes slider { from { opacity: 0; transform: translateX(-40px); } }
+
+/* ---------- Zitate im Club ---------- */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 4px -8px; }
+.section-head .group-title { margin: 0; }
+.club-quotes { display: flex; flex-direction: column; gap: 10px; }
+.club-quote { display: flex; flex-direction: column; gap: 6px; }
+.cq-text { font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1.45; color: var(--text); }
+.cq-src { font-size: 13px; color: var(--text-3); }
+.cq-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-height: 36px; }
+.cq-foot small { flex: 1; min-width: 0; color: var(--text-2); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-foot .link .ic { width: 18px; height: 18px; }
+.cq-have { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--accent-text); }
+.cq-have .ic { width: 16px; height: 16px; }
+.avatar.xs { width: 24px; height: 24px; font-size: 11px; }
+.btn.sm { min-height: 36px; padding: 0 12px; font-size: 14px; border-radius: 12px; }
+.btn.sm .ic { width: 16px; height: 16px; }
+.ratings { display: flex; flex-direction: column; gap: 12px; }
+.ratings .v-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-quote { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 4px; border-bottom: 1px solid var(--line); width: 100%; }
+.pick-quote span { font-family: Georgia, "Times New Roman", serif; font-size: 16px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pick-quote small { color: var(--text-3); font-size: 13px; }
+.pick-quote.done { opacity: .5; }
+.plus-grid.two { margin-bottom: 8px; }
+
+/* ---------- Was ist neu ---------- */
+.news-card {
+  position: relative; overflow: hidden; border-radius: var(--radius); padding: 16px 18px 18px;
+  color: var(--on-accent); background: linear-gradient(135deg, var(--f3), var(--f1) 55%, var(--f2));
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--f1) 35%, transparent);
+  animation: newsin .5s var(--spring); transition: opacity .28s, transform .28s var(--ease);
+}
+.news-card.bye { opacity: 0; transform: scale(.96) translateY(-8px); }
+@keyframes newsin { from { opacity: 0; transform: translateY(12px) scale(.98); } }
+.news-blobs i { position: absolute; border-radius: 50%; background: rgba(255,255,255,.15); }
+.news-blobs i:nth-child(1) { width: 150px; height: 150px; right: -40px; top: -60px; animation: float 8s ease-in-out infinite; }
+.news-blobs i:nth-child(2) { width: 80px; height: 80px; left: 40%; bottom: -40px; animation: float 10s ease-in-out infinite reverse; }
+.news-head { position: relative; display: flex; align-items: center; gap: 8px; }
+.news-head .ic { width: 22px; height: 22px; }
+.news-head strong { font-family: var(--font-round); font-size: 20px; font-weight: 800; }
+.news-head small { margin-left: auto; font-size: 12px; opacity: .85; font-weight: 600; }
+.news-card ul { position: relative; margin: 10px 0 14px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
+.news-ok { position: relative; width: 100%; background: rgba(255,255,255,.22); color: inherit; border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }

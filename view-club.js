@@ -1,11 +1,11 @@
 // view-club.js – Community-Tab: Buchclub mit Lese-Wettrennen, Treffen, Status und Fazits
 import * as store from './store.js';
 import * as club from './club.js';
-import { fmtNum, fmtDate, clubRace, meetingInfo, fmtDaysUntil, timeAgo, heartsFor, normalizeClubCode, fmtClubCode, dayKey, WEEKDAYS, MONTHS } from './core.js';
+import { fmtNum, fmtDate, clubRace, meetingInfo, fmtDaysUntil, timeAgo, heartsFor, normalizeClubCode, fmtClubCode, dayKey, quoteSource, WEEKDAYS, MONTHS } from './core.js';
 import { icon } from './icons.js';
 import { esc, A, openSheet, closeSheet, sheetHead, toast, confirmDialog, starsView, coverHtml, moreBtn } from './ui.js';
 import { VIEWS, nav, render } from './nav.js';
-import { bookForm } from './sheets.js';
+import { bookForm, quoteSheet } from './sheets.js';
 import { startSessionSheet } from './session.js';
 
 let animatedFor = null; // Balken nur beim ersten Anzeigen wachsen lassen
@@ -95,7 +95,7 @@ function groupView(i, L, g) {
   const grow = animatedFor !== i.code;
   animatedFor = i.code;
   const admin = club.isAdmin();
-  const finishedRows = rows.filter(r => r.finished && (r.rating || r.verdict));
+  const finishedRows = rows.filter(r => r.finished && r.rating);
 
   const statusLine = L.status === 'live' ? `<span class="live-dot"></span>Live · ${timeAgo(L.updatedAt, now)}`
     : L.status === 'error' ? `${icon('info')}${esc(L.error || 'Offline')}`
@@ -129,15 +129,14 @@ function groupView(i, L, g) {
     </div>
   </section>
 
+  ${quotesSection(L, now)}
+
   ${finishedRows.length ? `
-  <h2 class="group-title">Fazits</h2>
-  <section class="verdicts">${finishedRows.map(r => `
-    <article class="card verdict">
-      <div class="v-head"><span class="avatar" style="--av:var(--${hue(r.uid)})">${initial(r.name)}</span>
-        <div><strong>${esc(r.name)}${r.uid === L.uid ? ' <small>(du)</small>' : ''}</strong><small>Fertig ${esc(fmtDate(r.finishedAt, { year: false }))}</small></div>
-        ${r.rating ? starsView(r.rating) : ''}</div>
-      ${r.verdict ? `<p>${esc(r.verdict)}</p>` : ''}
-    </article>`).join('')}
+  <h2 class="group-title">Bewertungen</h2>
+  <section class="card ratings">${finishedRows.map(r => `
+    <div class="v-head"><span class="avatar" style="--av:var(--${hue(r.uid)})">${initial(r.name)}</span>
+      <div><strong>${esc(r.name)}${r.uid === L.uid ? ' <small>(du)</small>' : ''}</strong><small>${esc(r.bookTitle || '')} · fertig ${esc(fmtDate(r.finishedAt, { year: false }))}</small></div>
+      ${starsView(r.rating)}</div>`).join('')}
   </section>` : ''}
 
   <h2 class="group-title">Gruppe</h2>
@@ -175,7 +174,7 @@ function myCard(i, my, main, L) {
     ${i.status ? `<p class="my-status">„${esc(i.status)}“</p>` : ''}
     <div class="my-actions">
       ${finished
-        ? `<button class="btn primary" data-act="clubVerdict">${icon('star')}${i.verdict ? 'Fazit bearbeiten' : 'Fazit teilen'}</button>`
+        ? `<button class="btn primary" data-act="clubQuoteAdd">${icon('quote')}Zitat teilen</button>`
         : `<button class="btn primary" data-act="clubRead" data-id="${my.id}">${icon('timer')}Weiterlesen</button>`}
       <button class="btn tonal" data-act="clubStatus">${icon('pen')}Status</button>
     </div>
@@ -208,6 +207,42 @@ function raceRow(r, L, main, target, now) {
     ${r.status ? `<div class="race-status"><p>„${esc(r.status)}“ <small>${esc(timeAgo(r.statusAt, now))}</small></p>
       <button class="heart ${hearts && hearts.mine ? 'on' : ''}" ${me ? 'disabled' : `data-act="clubHeart" data-to="${esc(r.uid)}" data-at="${r.statusAt}"`} aria-label="Herz">${icon('heart')}<span>${hearts && hearts.count ? hearts.count : ''}</span></button></div>` : ''}
   </div>`;
+}
+
+/* ---------- Zitate im Club ---------- */
+
+let showAllQuotes = false;
+const sameText = (a, b) => String(a || '').trim().replace(/\s+/g, ' ').toLowerCase() === String(b || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const clubQuoteSource = q => [q.bookAuthor, q.bookTitle].filter(Boolean).join(', ') + (q.chapter ? ` · Kap. ${q.chapter}` : '') + (q.page ? ` · S. ${q.page}` : '');
+
+function quotesSection(L, now) {
+  const list = (L.quotes || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const mine = store.get().quotes;
+  const shown = showAllQuotes ? list : list.slice(0, 4);
+  return `
+  <div class="section-head"><h2 class="group-title">Zitate aus dem Club</h2>
+    <button class="link small" data-act="clubQuoteAdd">${icon('plus')}Teilen</button></div>
+  ${list.length ? `
+  <section class="club-quotes">${shown.map(q => {
+    const own = q.from === L.uid;
+    const have = !own && mine.some(m => sameText(m.text, q.text));
+    return `<article class="card club-quote">
+      <p class="cq-text">„${esc(q.text)}“</p>
+      <p class="cq-src">${esc(clubQuoteSource(q))}</p>
+      <div class="cq-foot">
+        <span class="avatar xs" style="--av:var(--${hue(q.from)})">${initial(q.name)}</span>
+        <small>${esc(own ? 'Du' : q.name)} · ${esc(timeAgo(q.createdAt, now))}</small>
+        ${own || club.isAdmin()
+          ? `<button class="link small muted" data-act="clubQuoteDel" data-id="${esc(q.id)}" aria-label="Zitat aus dem Club entfernen">${icon('trash')}</button>` : ''}
+        ${own ? '' : have
+          ? `<span class="cq-have">${icon('check')}In deiner Liste</span>`
+          : `<button class="btn tonal sm" data-act="clubQuoteTake" data-id="${esc(q.id)}">${icon('plus')}Übernehmen</button>`}
+      </div>
+    </article>`;
+  }).join('')}
+  ${list.length > 4 ? `<button class="btn ghost" data-act="clubQuotesMore">${showAllQuotes ? 'Weniger anzeigen' : `Alle ${list.length} Zitate anzeigen`}</button>` : ''}
+  </section>` : `
+  <button class="banner tonal-banner" data-act="clubQuoteAdd">${icon('quote')}<span><strong>Erstes Zitat teilen</strong><small>Die anderen können es in ihre Liste übernehmen</small></span>${icon('chevronRight')}</button>`}`;
 }
 
 /* ---------- Live neu zeichnen ---------- */
@@ -267,8 +302,8 @@ Object.assign(A, {
     openSheet(`<h2 class="sheet-title">Was wird geteilt?</h2>
       <div class="help">
         <p><strong>Mit deiner Gruppe teilst du nur:</strong></p>
-        <ul><li>deinen Namen (den du selbst wählst)</li><li>Titel und Autor:in deines Clubbuchs</li><li>deine aktuelle Seite und dein Tempo (Seiten pro Tag)</li><li>deinen Status-Satz, falls du einen schreibst</li><li>nach dem Fertiglesen deine Sterne und dein Fazit</li></ul>
-        <p><strong>Am iPhone bleiben:</strong> alle anderen Bücher, Notizen, Zitate, Fotos, Reflexionsfragen und Statistiken.</p>
+        <ul><li>deinen Namen (den du selbst wählst)</li><li>Titel und Autor:in deines Clubbuchs</li><li>deine aktuelle Seite und dein Tempo (Seiten pro Tag)</li><li>deinen Status-Satz, falls du einen schreibst</li><li>nach dem Fertiglesen deine Sterne (nicht dein Fazit)</li><li>Zitate, die du selbst im Club teilst</li></ul>
+        <p><strong>Am iPhone bleiben:</strong> alle anderen Bücher, deine übrigen Zitate, Notizen, Fazits, Fotos, Reflexionsfragen und Statistiken.</p>
         <p>Die Club-Daten liegen in einer Gratis-Datenbank von Google Firebase (Server in Frankfurt). Mitglieder brauchen kein Konto: Die App meldet sich anonym an. Nur wer den Gruppen-Code kennt, sieht die Gruppe.</p>
         <p>Wenn du die Gruppe verlässt, wird dein Eintrag gelöscht.</p>
       </div>`);
@@ -346,15 +381,54 @@ Object.assign(A, {
       save: async v => { club.setInfo({ status: v, statusAt: v ? Date.now() : null }); } });
   },
 
-  clubVerdict() {
-    const i = club.info();
-    const b = i.bookId ? store.book(i.bookId) : null;
-    textSheet({ title: 'Fazit', label: 'Dein Fazit für die Gruppe', value: i.verdict, max: 280, multiline: true,
-      placeholder: 'Was hat dir gefallen, was nicht?',
-      hint: b && b.rating && b.rating.overall ? `Deine Sterne (${String(b.rating.overall).replace('.', ',')}) werden mitgeteilt.` : 'Sterne vergibst du beim Abschließen des Buchs.',
-      clear: i.verdict ? 'Fazit löschen' : null,
-      save: async v => { club.setInfo({ verdict: v }); } });
+  /* ----- Zitate im Club ----- */
+
+  clubQuoteAdd() {
+    const hasQuotes = store.get().quotes.length > 0;
+    if (!store.get().books.length) { toast('Füge zuerst ein Buch hinzu', { icon: 'info' }); return; }
+    openSheet(`<h2 class="sheet-title">Zitat teilen</h2>
+      <div class="plus-grid two">
+        <button class="plus-item" data-q="new"><span class="plus-ic">${icon('mic')}</span><strong>Neues Zitat</strong><small>Schreiben oder diktieren</small></button>
+        <button class="plus-item ${hasQuotes ? '' : 'dim'}" data-q="mine"><span class="plus-ic">${icon('quote')}</span><strong>Aus meinen Zitaten</strong><small>${hasQuotes ? 'Eines auswählen' : 'Noch keine Zitate'}</small></button>
+      </div>
+      <p class="hint">Neue Zitate landen auch in deiner eigenen Liste.</p>`, {
+      onMount(root, entry) {
+        root.addEventListener('click', e => {
+          const b = e.target.closest('[data-q]');
+          if (!b) return;
+          if (b.dataset.q === 'mine' && !hasQuotes) return;
+          closeSheet(entry);
+          setTimeout(() => {
+            if (b.dataset.q === 'new') {
+              quoteSheet({ bookId: club.info().bookId, title: 'Zitat für den Club', onSaved: q => shareQuote(q) });
+            } else pickOwnQuote();
+          }, 250);
+        });
+      },
+    });
   },
+
+  async clubQuoteDel(el) {
+    const ok = await confirmDialog({ title: 'Zitat aus dem Club entfernen?', text: 'In deiner eigenen Liste bleibt es erhalten.', ok: 'Entfernen', danger: true });
+    if (ok) await busy(null, () => club.deleteClubQuote(el.dataset.id));
+  },
+
+  async clubQuoteTake(el) {
+    const q = (club.live.quotes || []).find(x => x.id === el.dataset.id);
+    if (!q) return;
+    const d = store.get();
+    let book = d.books.find(b => sameText(b.title, q.bookTitle));
+    if (!book) {
+      const ok = await confirmDialog({ title: `„${q.bookTitle}“ anlegen?`, text: 'Dieses Buch ist noch nicht in deiner Bibliothek. Es kommt auf deine Wunschliste, und das Zitat wird dort gespeichert.', ok: 'Anlegen' });
+      if (!ok) return;
+      book = store.addBook({ title: q.bookTitle || 'Unbekanntes Buch', author: q.bookAuthor || '', status: 'want' });
+    }
+    const page = Number(q.page);
+    store.addQuote({ bookId: book.id, text: q.text, page: page > 0 ? page : null, chapter: q.chapter || '', fav: false });
+    toast('Zitat in deine Liste übernommen', { icon: 'quote' });
+  },
+
+  clubQuotesMore() { showAllQuotes = !showAllQuotes; render(); },
 
   clubPick() {
     const d = store.get();
@@ -472,3 +546,34 @@ function addAndLink(preset) {
   bookForm(null, preset);
 }
 
+
+/** Eigenes Zitat (aus der lokalen Liste) im Club teilen */
+async function shareQuote(q) {
+  if (!q) return;
+  const ok = await busy(null, () => club.shareQuote(q).then(() => true));
+  if (ok) toast('Zitat im Club geteilt', { icon: 'quote' });
+}
+
+function pickOwnQuote() {
+  const d = store.get();
+  const shared = new Set((club.live.quotes || []).filter(x => x.from === club.live.uid).map(x => x.localId));
+  const clubBook = club.info().bookId;
+  const list = d.quotes.slice().sort((a, b) => ((b.bookId === clubBook) - (a.bookId === clubBook)) || ((b.createdAt || 0) - (a.createdAt || 0)));
+  openSheet(`<h2 class="sheet-title">Aus meinen Zitaten</h2>
+    <div class="pick-list">${list.map(q => {
+      const b = store.book(q.bookId);
+      const done = shared.has(q.id);
+      return `<button class="pick-quote ${done ? 'done' : ''}" data-qid="${q.id}" ${done ? 'disabled' : ''}>
+        <span>„${esc(q.text)}“</span><small>${esc(quoteSource(q, b))}${done ? ' · schon geteilt' : ''}</small></button>`;
+    }).join('')}</div>`, {
+    tall: list.length > 4,
+    onMount(root, entry) {
+      root.addEventListener('click', e => {
+        const b = e.target.closest('[data-qid]');
+        if (!b || b.disabled) return;
+        closeSheet(entry);
+        shareQuote(d.quotes.find(x => x.id === b.dataset.qid));
+      });
+    },
+  });
+}

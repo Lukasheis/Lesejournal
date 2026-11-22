@@ -10,10 +10,11 @@ export const nav = {
     return state.stack.length ? state.stack[state.stack.length - 1] : { name: state.tab, params: {} };
   },
   get tabName() { return state.tab; },
-  tab(t) {
+  get stackDepth() { return state.stack.length; },
+  tab(t, anim = 'fade') {
     if (state.tab === t && !state.stack.length) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
     state.tab = t; state.stack = [];
-    render({ top: true, anim: 'fade' });
+    render({ top: true, anim });
   },
   push(name, params = {}) {
     state.stack.push({ name, params, scroll: window.scrollY });
@@ -36,7 +37,7 @@ export function render({ top = false, anim = null, scroll = null } = {}) {
   root.innerHTML = v.render(cur.params || {});
   root.dataset.view = cur.name;
   if (anim) {
-    root.classList.remove('anim-push', 'anim-pop', 'anim-fade');
+    root.classList.remove('anim-push', 'anim-pop', 'anim-fade', 'anim-slide-l', 'anim-slide-r');
     void root.offsetWidth;
     root.classList.add('anim-' + anim);
   }
