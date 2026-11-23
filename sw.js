@@ -1,6 +1,6 @@
 // sw.js – network-first: bei Netz immer die neueste Version, offline aus dem Cache.
 // Bei JEDEM Update die Nummer im Cache-Namen hochzählen!
-const CACHE = 'lesejournal-v8';
+const CACHE = 'lesejournal-v9';
 
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png',

@@ -1,6 +1,6 @@
 // core.js – reine Rechenlogik ohne DOM (mit jsc testbar)
 
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.3.0';
 export const DATA_VERSION = 1;
 
 /* ---------- Zahlen & Datum (Deutsch/Österreich) ---------- */
@@ -620,7 +620,7 @@ export function defaultSettings() {
 }
 
 export function emptyData() {
-  return { version: DATA_VERSION, books: [], sessions: [], quotes: [], settings: defaultSettings(), activeSession: null, club: emptyClub() };
+  return { version: DATA_VERSION, books: [], sessions: [], quotes: [], settings: defaultSettings(), activeSession: null, clubs: [], activeClub: null };
 }
 
 export function migrate(raw) {
@@ -633,7 +633,8 @@ export function migrate(raw) {
     quotes: Array.isArray(raw.quotes) ? raw.quotes : [],
     settings: Object.assign(base.settings, raw.settings || {}),
     activeSession: raw.activeSession || null,
-    club: Object.assign(emptyClub(), raw.club || {}),
+    clubs: [],
+    activeClub: null,
   };
   if (!Array.isArray(data.settings.reflectionQuestions) || !data.settings.reflectionQuestions.length) {
     data.settings.reflectionQuestions = DEFAULT_QUESTIONS.slice();
@@ -643,6 +644,8 @@ export function migrate(raw) {
     b.currentPage = Number(b.currentPage) || 0;
     if (!b.status) b.status = 'want';
   }
+  data.clubs = migrateClubs(raw, data.books);
+  data.activeClub = data.clubs.some(c => c.code === raw.activeClub) ? raw.activeClub : (data.clubs[0] ? data.clubs[0].code : null);
   return data;
 }
 
@@ -708,37 +711,82 @@ export function pagesPerDay(sessions, bookId, now = Date.now(), days = 7) {
   return Math.round(pages / days * 10) / 10;
 }
 
-/** Was ein Mitglied mit der Gruppe teilt (nur das Clubbuch, keine Notizen) */
-export function clubSnapshot(book, sessions, club, now = Date.now()) {
-  const base = {
-    name: String(club.name || '').trim().slice(0, 30) || 'Mitglied',
-    status: String(club.status || '').slice(0, 120),
-    statusAt: club.status ? (club.statusAt || null) : null,
-  };
-  if (!book) return { ...base, bookTitle: null, bookAuthor: null, page: 0, total: 0, progress: 0, pace: 0, finishedAt: null, rating: null, verdict: '' };
+/* ---------- Buchclub: mehrere Clubs, Regal, Bewertungen ---------- */
+
+/** Schlüssel eines Buchs im Club, aus dem Titel („Über Menschen“ → „ueber-menschen“) */
+export function slugify(title) {
+  const s = String(title || '').toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
+  return s || 'buch';
+}
+
+export function clubEntry(code, name = '') {
+  return { code, name, links: {}, ratings: {}, status: '', statusAt: null };
+}
+
+/** Ein eigenes Buch, so wie es der Club sieht (keine Notizen, kein Fazit) */
+export function clubBookProgress(book, sessions, now = Date.now()) {
   const finished = book.status === 'finished';
+  const total = Number(book.totalPages) || 0;
   return {
-    ...base,
-    bookTitle: String(book.title || '').slice(0, 120),
-    bookAuthor: String(book.author || '').slice(0, 80) || null,
-    page: finished ? (Number(book.totalPages) || 0) : (Number(book.currentPage) || 0),
-    total: Number(book.totalPages) || 0,
+    title: String(book.title || '').slice(0, 120),
+    author: String(book.author || '').slice(0, 80),
+    page: finished ? total : (Number(book.currentPage) || 0),
+    total,
     progress: Math.round(bookProgress(book) * 1000) / 1000,
     pace: pagesPerDay(sessions, book.id, now),
+    startedAt: book.startedAt || null,
     finishedAt: finished ? (book.finishedAt || now) : null,
-    rating: finished && book.rating && book.rating.overall ? book.rating.overall : null,
-    verdict: '', // Das Fazit bleibt privat – der Club sieht nur die Sterne
   };
 }
 
-/** Rennen: Fertige zuerst (wer zuerst fertig war), dann nach Fortschritt, dann nach Tempo */
-export function clubRace(members) {
-  const rows = members.map(m => {
-    const progress = m.finishedAt ? 1 : Math.min(1, Math.max(0, Number(m.progress) || 0));
-    return { ...m, progress, finished: !!m.finishedAt, noBook: !m.bookTitle, pct: Math.round(progress * 100) };
-  });
+/** Was ein Mitglied mit einer Gruppe teilt: Name, Status, verknüpfte Bücher, Sterne */
+export function clubSnapshot(data, entry, now = Date.now()) {
+  const reading = {}, ratings = {};
+  for (const [slug, id] of Object.entries(entry.links || {})) {
+    const b = data.books.find(x => x.id === id);
+    if (!b) continue;
+    reading[slug] = clubBookProgress(b, data.sessions, now);
+    if (b.status === 'finished' && b.rating && b.rating.overall) ratings[slug] = b.rating.overall;
+  }
+  for (const [slug, v] of Object.entries(entry.ratings || {})) if (Number(v) > 0 && !(slug in ratings)) ratings[slug] = Number(v);
+  return {
+    name: String(entry.name || '').trim().slice(0, 30) || 'Mitglied',
+    status: String(entry.status || '').slice(0, 120),
+    statusAt: entry.status ? (entry.statusAt || null) : null,
+    reading, ratings,
+  };
+}
+
+/** Bücher eines Mitglieds (auch alte Einträge aus Version 1.1/1.2 mit nur einem Buch) */
+export function memberBooks(m) {
+  if (m && m.reading && typeof m.reading === 'object') return m.reading;
+  if (m && m.bookTitle) {
+    return { [slugify(m.bookTitle)]: { title: m.bookTitle, author: m.bookAuthor || '', page: m.page || 0, total: m.total || 0,
+      progress: m.progress || 0, pace: m.pace || 0, startedAt: null, finishedAt: m.finishedAt || null } };
+  }
+  return {};
+}
+
+export function memberRating(m, slug) {
+  if (m && m.ratings && Number(m.ratings[slug]) > 0) return Number(m.ratings[slug]);
+  if (m && !m.reading && m.bookTitle && slugify(m.bookTitle) === slug && m.rating) return m.rating;
+  return null;
+}
+
+/** Rennen für ein Clubbuch: Fertige zuerst (wer zuerst fertig war), dann Fortschritt, dann Tempo */
+export function clubRace(members, slug) {
+  const rows = [];
+  for (const m of members) {
+    const e = memberBooks(m)[slug];
+    if (!e) continue;
+    const progress = e.finishedAt ? 1 : Math.min(1, Math.max(0, Number(e.progress) || 0));
+    rows.push({ uid: m.uid, name: m.name, status: m.status, statusAt: m.statusAt, updatedAt: m.updatedAt, ...e,
+      progress, finished: !!e.finishedAt, pct: Math.round(progress * 100), rating: memberRating(m, slug) });
+  }
   rows.sort((a, b) => {
-    if (a.noBook !== b.noBook) return a.noBook ? 1 : -1;
     if (a.finished && b.finished) return a.finishedAt - b.finishedAt;
     if (a.finished !== b.finished) return a.finished ? -1 : 1;
     if (b.progress !== a.progress) return b.progress - a.progress;
@@ -746,6 +794,55 @@ export function clubRace(members) {
   });
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
+}
+
+/** Sterne aller Mitglieder für ein Clubbuch */
+export function ratingSummary(members, slug) {
+  const list = members.map(m => ({ uid: m.uid, name: m.name, rating: memberRating(m, slug) })).filter(x => x.rating > 0)
+    .sort((a, b) => b.rating - a.rating);
+  const avg = list.length ? Math.round(list.reduce((s, x) => s + x.rating, 0) / list.length * 10) / 10 : null;
+  return { avg, count: list.length, list };
+}
+
+/** Club-Regal: aktuelle und gelesene Bücher (auch Bücher, die nur Mitglieder verknüpft haben) */
+export function clubShelf(books, members) {
+  const map = new Map();
+  for (const b of books || []) map.set(b.slug, { ...b });
+  for (const m of members || []) {
+    for (const [slug, e] of Object.entries(memberBooks(m))) {
+      if (!map.has(slug)) map.set(slug, { slug, title: e.title, author: e.author || '', total: e.total || 0, status: 'current', start: null, end: null, implicit: true });
+    }
+  }
+  const all = [...map.values()];
+  const t = b => b.start ? dayKeyToDate(b.start).getTime() : (b.addedAt || 0);
+  const te = b => b.end ? dayKeyToDate(b.end).getTime() : (b.addedAt || 0);
+  return {
+    current: all.filter(b => b.status !== 'done').sort((a, b) => t(b) - t(a)),
+    done: all.filter(b => b.status === 'done').sort((a, b) => te(b) - te(a)),
+  };
+}
+
+/** Zeitraum eines Clubbuchs als Text */
+export function fmtSpan(start, end) {
+  const f = k => fmtDate(dayKeyToDate(k).getTime());
+  if (start && end) return `${f(start)} – ${f(end)}`;
+  if (start) return `seit ${f(start)}`;
+  if (end) return `bis ${f(end)}`;
+  return '';
+}
+
+/** Alte Ein-Club-Daten (Version 1.1/1.2) in die Liste mehrerer Clubs übernehmen */
+function migrateClubs(raw, books) {
+  if (Array.isArray(raw.clubs)) {
+    return raw.clubs.filter(c => c && c.code).map(c => ({ ...clubEntry(c.code, c.name || ''), ...c, links: { ...(c.links || {}) }, ratings: { ...(c.ratings || {}) } }));
+  }
+  const old = raw.club;
+  if (!old || !old.code) return [];
+  const e = clubEntry(old.code, old.name || '');
+  e.status = old.status || ''; e.statusAt = old.statusAt || null;
+  const b = old.bookId && books.find(x => x.id === old.bookId);
+  if (b) e.links[slugify(b.title)] = b.id;
+  return [e];
 }
 
 /** Treffen: Tage bis dahin und wie weit man heute sein sollte (Soll-Linie) */
@@ -786,9 +883,6 @@ export function heartsFor(hearts, toUid, statusAt, myUid) {
   return { count: list.length, mine: list.some(h => h.from === myUid) };
 }
 
-export function emptyClub() {
-  return { code: null, name: '', bookId: null, status: '', statusAt: null, verdict: '' };
-}
 
 /* ---------- Countdown-Dauer ---------- */
 
@@ -814,6 +908,13 @@ export function fmtMinutes(total) {
 /* ---------- Was ist neu ---------- */
 
 export const CHANGELOG = [
+  { version: '1.3.0', items: [
+    'Mehrere Clubs: Oben im Club-Tab zwischen deinen Clubs wechseln oder mit „+ Club“ einem weiteren beitreten.',
+    'Mehrere Bücher gleichzeitig im Club, jedes mit eigenem Rennen. Mit „Lese ich auch“ machst du mit.',
+    'Unser Regal: Gemeinsam gelesene Bücher nachtragen und mit Sternen bewerten, mit Club-Durchschnitt.',
+    'Beginn und Ende eines Buchs frei wählen, in deinen Büchern und für Clubbücher.',
+    'Zitate teilen: nach Buch sortiert, mit Suche und mehrere auf einmal.',
+  ] },
   { version: '1.2.0', items: [
     'Countdown beliebig lang: Unter „Eigene“ Stunden und Minuten eingeben.',
     'Zitate diktieren statt abfotografieren: Auf „Diktieren“ tippen und ins Mikrofon der Tastatur sprechen.',
@@ -838,4 +939,11 @@ export function compareVersions(a, b) {
 /** Neuerungen, die noch nicht als gelesen markiert sind (neueste zuerst) */
 export function pendingChanges(seenVersion, current = APP_VERSION, log = CHANGELOG) {
   return log.filter(e => compareVersions(e.version, seenVersion || '1.0.0') > 0 && compareVersions(e.version, current) <= 0);
+}
+
+/** Datum aus einem Datumsfeld → Zeitpunkt. Gleicher Tag wie vorher = Uhrzeit behalten, heute = jetzt, sonst Mittag */
+export function keepTime(key, prevTs = null, now = Date.now()) {
+  if (prevTs && dayKey(prevTs) === key) return prevTs;
+  if (key === dayKey(now)) return now;
+  return dayKeyToDate(key).getTime() + 12 * 3600000;
 }

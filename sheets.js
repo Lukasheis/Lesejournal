@@ -1,6 +1,6 @@
 // sheets.js – Eingabedialoge: Plus-Menü, Buch, Zitat, Seiten nachtragen, Buch abschließen
 import * as store from './store.js';
-import { parseNum, fmtNum, fmtDate, fmtDuration, dayKey, maxChapterNumber, normalizeIsbn, fmtIsbn, RATING_CATEGORIES } from './core.js';
+import { parseNum, fmtNum, fmtDate, fmtDuration, dayKey, maxChapterNumber, normalizeIsbn, fmtIsbn, RATING_CATEGORIES, keepTime } from './core.js';
 import { icon } from './icons.js';
 import { esc, openSheet, closeSheet, sheetHead, segmented, toggle, starsInput, toast, confirmDialog, pickFile, coverHtml, hydratePhotos, confetti } from './ui.js';
 import { scanIsbn, ocrCover, ocrText } from './scan.js';
@@ -89,6 +89,12 @@ export function bookForm(bookId = null, preset = {}) {
           <div class="cur-wrap"><label class="lbl" for="f-current">Bin auf Seite</label><input id="f-current" class="input" inputmode="numeric" value="${b.currentPage || ''}" placeholder="0"></div>
           <div><label class="lbl" for="f-isbn">ISBN</label><input id="f-isbn" class="input" inputmode="numeric" value="${esc(b.isbn ? fmtIsbn(b.isbn) : '')}" placeholder="978-…"></div>
         </div>`}
+      <div class="row2 dates-row">
+        <div class="start-wrap" ${b.status === 'want' ? 'hidden' : ''}><label class="lbl" for="f-start">Begonnen am</label>
+          <input id="f-start" type="date" class="input" value="${b.startedAt ? dayKey(b.startedAt) : (existing ? '' : dayKey(Date.now()))}" max="${dayKey(Date.now())}"></div>
+        <div class="end-wrap" ${existing && (b.status === 'finished' || b.status === 'abandoned') ? '' : 'hidden'}><label class="lbl" for="f-end">${b.status === 'abandoned' ? 'Abgebrochen am' : 'Beendet am'}</label>
+          <input id="f-end" type="date" class="input" value="${b.finishedAt ? dayKey(b.finishedAt) : ''}" max="${dayKey(Date.now())}"></div>
+      </div>
       <label class="lbl" for="f-blurb">Klappentext <small>(optional)</small></label>
       <textarea id="f-blurb" class="input" rows="4" placeholder="Worum geht es?">${esc(b.blurb)}</textarea>
       ${existing ? `<button class="btn ghost danger" data-s="delete">${icon('trash')}Buch löschen</button>` : ''}
@@ -104,7 +110,11 @@ export function bookForm(bookId = null, preset = {}) {
       $('#f-title').addEventListener('focus', () => { lastField = $('#f-title'); });
       $('#f-author').addEventListener('focus', () => { lastField = $('#f-author'); });
       const curWrap = root.querySelector('.cur-wrap');
-      root.addEventListener('segchange', e => { status = e.detail.value; if (curWrap) curWrap.style.visibility = status === 'reading' ? '' : 'hidden'; });
+      root.addEventListener('segchange', e => {
+        status = e.detail.value;
+        if (curWrap) curWrap.style.visibility = status === 'reading' ? '' : 'hidden';
+        $('.start-wrap').hidden = status === 'want';
+      });
       const ocrStatus = $('.ocr-status');
       const showStatus = t => { ocrStatus.hidden = !t; ocrStatus.innerHTML = t ? `<span class="spinner"></span>${esc(t)}` : ''; };
 
@@ -173,7 +183,7 @@ export function bookForm(bookId = null, preset = {}) {
         const isbnRaw = $('#f-isbn').value.trim();
         const isbn = isbnRaw ? normalizeIsbn(isbnRaw) : '';
         if (isbnRaw && !isbn) { toast('Die ISBN ist ungültig', { icon: 'info' }); $('#f-isbn').focus(); return; }
-        if (status !== 'want' && !(total > 0)) { $('#f-pages').focus(); toast('Bitte die Seitenzahl eintragen', { icon: 'info' }); return; }
+        if (status === 'reading' && !(total > 0)) { $('#f-pages').focus(); toast('Bitte die Seitenzahl eintragen', { icon: 'info' }); return; }
         if (total > 0 && current > total) { toast('Aktuelle Seite ist größer als die Seitenzahl', { icon: 'info' }); return; }
         const fields = {
           title, author: $('#f-author').value.trim(), isbn: isbn || '',
@@ -181,6 +191,12 @@ export function bookForm(bookId = null, preset = {}) {
           blurb: $('#f-blurb').value.trim(),
         };
         if (!isNaN(current)) fields.currentPage = current;
+        // Beginn und Ende frei wählbar (gleicher Tag = Uhrzeit behalten)
+        const startKey = $('.start-wrap').hidden ? '' : $('#f-start').value;
+        const endKey = $('.end-wrap').hidden ? '' : $('#f-end').value;
+        if (startKey && endKey && endKey < startKey) { toast('Das Ende liegt vor dem Beginn', { icon: 'info' }); return; }
+        if (!$('.start-wrap').hidden) fields.startedAt = startKey ? keepTime(startKey, existing && existing.startedAt) : null;
+        if (!$('.end-wrap').hidden && endKey) fields.finishedAt = keepTime(endKey, existing && existing.finishedAt);
         for (const kind of ['cover', 'back']) {
           if (newPhotos[kind]) {
             const key = kind === 'cover' ? 'coverId' : 'backId';
@@ -387,8 +403,12 @@ export function finishBookFlow(bookId, { already = false, edit = false } = {}) {
       <p class="hint center" id="ov-txt">${rating.overall ? '' : 'Tippe auf die linke oder rechte Hälfte eines Sterns'}</p>
       <label class="lbl">Im Detail <small>(optional)</small></label>
       <div class="cat-rows">${RATING_CATEGORIES.map(c => `<div class="cat-row"><span>${c.name}</span>${starsInput(c.id, rating[c.id] || 0)}</div>`).join('')}</div>
-      <label class="lbl" for="fin-date">Beendet am</label>
-      <input id="fin-date" type="date" class="input" value="${dayKey(b.finishedAt || Date.now())}" max="${dayKey(Date.now())}">
+      <div class="row2">
+        <div><label class="lbl" for="start-date">Begonnen am</label>
+          <input id="start-date" type="date" class="input" value="${b.startedAt ? dayKey(b.startedAt) : ''}" max="${dayKey(Date.now())}"></div>
+        <div><label class="lbl" for="fin-date">Beendet am</label>
+          <input id="fin-date" type="date" class="input" value="${dayKey(b.finishedAt || Date.now())}" max="${dayKey(Date.now())}"></div>
+      </div>
       <button class="btn primary big" data-s="next">Weiter zur Reflexion${icon('chevronRight')}</button>
     </div>
     <div class="form step step2" hidden>
@@ -418,6 +438,7 @@ export function finishBookFlow(bookId, { already = false, edit = false } = {}) {
         if (!btn) return;
         if (btn.dataset.s === 'next') {
           if (!rating.overall) { toast('Bitte zuerst eine Gesamtbewertung geben', { icon: 'star' }); return; }
+          if ($('#start-date').value && $('#fin-date').value && $('#fin-date').value < $('#start-date').value) { toast('Das Ende liegt vor dem Beginn', { icon: 'info' }); return; }
           showStep(2);
         } else if (btn.dataset.s === 'backstep') showStep(1);
         else if (btn.dataset.s === 'done') {
@@ -428,9 +449,11 @@ export function finishBookFlow(bookId, { already = false, edit = false } = {}) {
           const isToday = $('#fin-date').value === dayKey(Date.now());
           const finishedAt = isToday ? Date.now() : new Date(y, m - 1, d, 20).getTime();
           const wasFinished = b.status === 'finished' && !already;
+          const startKey = $('#start-date').value;
           store.updateBook(b.id, {
             status: 'finished', finishedAt, rating: { ...rating }, reflection: answers,
-            currentPage: b.totalPages || b.currentPage, startedAt: b.startedAt || finishedAt,
+            currentPage: b.totalPages || b.currentPage,
+            startedAt: startKey ? keepTime(startKey, b.startedAt) : (b.startedAt || finishedAt),
           });
           closeSheet(entry);
           if (edit || wasFinished) { toast('Gespeichert'); return; }
