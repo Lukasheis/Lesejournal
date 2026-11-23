@@ -1,6 +1,6 @@
 // core.js – reine Rechenlogik ohne DOM (mit jsc testbar)
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.4.1';
 export const DATA_VERSION = 1;
 
 /* ---------- Zahlen & Datum (Deutsch/Österreich) ---------- */
@@ -817,7 +817,8 @@ export function clubShelf(books, members) {
   const t = b => b.start ? dayKeyToDate(b.start).getTime() : (b.addedAt || 0);
   const te = b => b.end ? dayKeyToDate(b.end).getTime() : (b.addedAt || 0);
   return {
-    current: all.filter(b => b.status !== 'done').sort((a, b) => t(b) - t(a)),
+    current: all.filter(b => b.status !== 'done' && b.status !== 'want').sort((a, b) => t(b) - t(a)),
+    want: all.filter(b => b.status === 'want').sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)),
     done: all.filter(b => b.status === 'done').sort((a, b) => te(b) - te(a)),
   };
 }
@@ -908,6 +909,17 @@ export function fmtMinutes(total) {
 /* ---------- Was ist neu ---------- */
 
 export const CHANGELOG = [
+  { version: '1.4.1', items: [
+    'Cover direkt beim Clubbuch hinzufügen oder ändern: Buch im Regal antippen und auf das Cover tippen.',
+    'Im Regal gibt es jetzt den Knopf „Gelesenes Buch nachtragen“, mit Cover-Foto.',
+    'Updates kommen zuverlässiger an: Die App holt immer die neuesten Dateien.',
+  ] },
+  { version: '1.4.0', items: [
+    'Neue Seite „Unser Regal“ im Club: aufgebaut wie „Bücher“, mit Lesen wir, Wunsch und Gelesen.',
+    'Clubbücher mit Cover-Foto, ISBN-Scan und Klappentext anlegen. Das Cover sehen alle im Club.',
+    'Neue Kategorie „Club“ unter „Bücher“: alle deine Bücher mit Club-Bezug.',
+    'Zitate teilen: Cover sichtbar und ausgewählte Zitate deutlich markiert.',
+  ] },
   { version: '1.3.0', items: [
     'Mehrere Clubs: Oben im Club-Tab zwischen deinen Clubs wechseln oder mit „+ Club“ einem weiteren beitreten.',
     'Mehrere Bücher gleichzeitig im Club, jedes mit eigenem Rennen. Mit „Lese ich auch“ machst du mit.',
@@ -946,4 +958,16 @@ export function keepTime(key, prevTs = null, now = Date.now()) {
   if (prevTs && dayKey(prevTs) === key) return prevTs;
   if (key === dayKey(now)) return now;
   return dayKeyToDate(key).getTime() + 12 * 3600000;
+}
+
+/** Status eines Clubbuchs ↔ Status eines eigenen Buchs */
+export const CLUB_STATUS = { current: 'Lesen wir', want: 'Wunsch', done: 'Gelesen' };
+export const clubToOwnStatus = s => (s === 'done' ? 'finished' : s === 'want' ? 'want' : 'reading');
+export const ownToClubStatus = s => (s === 'finished' ? 'done' : s === 'want' ? 'want' : 'current');
+
+/** IDs meiner Bücher, die mit irgendeinem Club verknüpft sind (für die Kategorie „Club“) */
+export function clubLinkedIds(clubs) {
+  const ids = new Set();
+  for (const c of clubs || []) for (const id of Object.values(c.links || {})) ids.add(id);
+  return ids;
 }

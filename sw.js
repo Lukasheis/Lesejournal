@@ -1,6 +1,6 @@
 // sw.js – network-first: bei Netz immer die neueste Version, offline aus dem Cache.
 // Bei JEDEM Update die Nummer im Cache-Namen hochzählen!
-const CACHE = 'lesejournal-v9';
+const CACHE = 'lesejournal-v11';
 
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png',
@@ -10,7 +10,8 @@ const FILES = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' = immer frisch vom Server holen, nie eine ältere Kopie aus dem Browser-Zwischenspeicher
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -40,8 +41,9 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // GitHub hält Dateien bis zu 10 Minuten im Zwischenspeicher: immer beim Server nachfragen (no-cache)
   e.respondWith(
-    fetch(req)
+    (req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache' }) : fetch(req, { cache: 'no-cache' }))
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;

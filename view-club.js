@@ -2,9 +2,11 @@
 import * as store from './store.js';
 import * as club from './club.js';
 import { fmtNum, fmtDate, clubRace, clubShelf, ratingSummary, memberBooks, meetingInfo, fmtDaysUntil, timeAgo, heartsFor,
-  normalizeClubCode, fmtClubCode, dayKey, quoteSource, slugify, fmtSpan, keepTime, WEEKDAYS, MONTHS } from './core.js';
+  normalizeClubCode, fmtClubCode, dayKey, quoteSource, slugify, fmtSpan, keepTime, WEEKDAYS, MONTHS,
+  CLUB_STATUS, clubToOwnStatus, ownToClubStatus, normalizeIsbn, fmtIsbn } from './core.js';
 import { icon } from './icons.js';
-import { esc, A, openSheet, closeSheet, sheetHead, toast, confirmDialog, starsView, starsInput, coverHtml, moreBtn, toggle, segmented } from './ui.js';
+import { esc, A, openSheet, closeSheet, closeAllSheets, sheetHead, toast, confirmDialog, starsView, starsInput, coverHtml, hydratePhotos, pickFile, moreBtn, toggle, segmented } from './ui.js';
+import { scanIsbn, ocrCover } from './scan.js';
 import { VIEWS, nav, render } from './nav.js';
 import { quoteSheet } from './sheets.js';
 import { startSessionSheet } from './session.js';
@@ -146,12 +148,9 @@ function groupView(i, L, g, list) {
       <button class="btn primary" data-act="clubBookAdd">${icon('plus')}Clubbuch hinzufügen</button>
     </section>`}
 
-  ${quotesSection(L, now)}
+  ${shelfTeaser(shelf)}
 
-  <div class="section-head"><h2 class="group-title">Unser Regal</h2>
-    <button class="link small" data-act="clubBookPast">${icon('plus')}Nachtragen</button></div>
-  ${shelf.done.length ? `<section class="card shelf">${shelf.done.map(b => shelfItem(i, L, b)).join('')}</section>` : `
-  <button class="banner tonal-banner" data-act="clubBookPast">${icon('books')}<span><strong>Gelesenes Buch nachtragen</strong><small>Mit Zeitraum und euren Sternen</small></span>${icon('chevronRight')}</button>`}
+  ${quotesSection(L, now)}
 
   <h2 class="group-title">Gruppe</h2>
   <section class="card group">
@@ -173,7 +172,7 @@ function bookCard(i, L, b) {
   const finished = linked && mine.status === 'finished';
   const span = fmtSpan(b.start, b.end);
   return `<section class="card cbook">
-    <div class="my-row">${coverHtml(linked ? mine : fakeBook(b), 's')}
+    <div class="my-row">${clubCover(b, 's', linked ? mine : null)}
       <div><strong>${esc(b.title)}</strong>
         <small>${esc(b.author || '')}</small>
         <small class="muted">${[span, `${readers} ${readers === 1 ? 'liest' : 'lesen'} mit`].filter(Boolean).map(esc).join(' · ')}</small></div>
@@ -241,18 +240,6 @@ function raceRow(r, L, target, now) {
   </div>`;
 }
 
-/** Eintrag im Regal: gelesenes Buch mit Club-Durchschnitt */
-function shelfItem(i, L, b) {
-  const sum = ratingSummary(L.members, b.slug);
-  const mine = myRating(i, b.slug);
-  return `<button class="shelf-item" data-act="clubBookDetail" data-slug="${esc(b.slug)}">
-    ${coverHtml(fakeBook(b), 'xs')}
-    <span class="si-txt"><strong>${esc(b.title)}</strong><small>${esc([b.author, fmtSpan(b.start, b.end)].filter(Boolean).join(' · '))}</small>
-      ${mine ? '' : '<small class="si-ask">Noch nicht von dir bewertet</small>'}</span>
-    <span class="si-avg">${sum.avg ? `<b>${fmtNum(sum.avg, 1)}</b>${icon('star')}<small>${sum.count}</small>` : '<small>–</small>'}</span>
-  </button>`;
-}
-
 /* ---------- Zitate im Club ---------- */
 
 const clubQuoteSource = q => [q.bookAuthor, q.bookTitle].filter(Boolean).join(', ') + (q.chapter ? ` · Kap. ${q.chapter}` : '') + (q.page ? ` · S. ${q.page}` : '');
@@ -295,7 +282,7 @@ club.onLive(L => {
     const e = club.info(L.code);
     if (e && e.groupName !== L.group.name) { club.setInfo({ groupName: L.group.name }, L.code); return; }
   }
-  if (nav.current.name === 'club') render();
+  if (nav.current.name === 'club' || nav.current.name === 'clubShelf') render();
 });
 
 /* ---------- Hilfen ---------- */
@@ -352,6 +339,7 @@ function bookPicker(title, hint, onPick, { filter = () => true } = {}) {
     </div>`, {
     tall: list.length > 5,
     onMount(root, entry) {
+      hydratePhotos(root);
       root.addEventListener('click', e => {
         const p = e.target.closest('[data-pick]');
         if (p) { closeSheet(entry); onPick(store.book(p.dataset.pick)); }
@@ -559,220 +547,77 @@ Object.assign(A, {
 
   clubRead: el => startSessionSheet(el.dataset.id),
 
-  /** Neues Clubbuch: aus eigenen Büchern oder neu eintragen */
-  clubBookAdd() {
-    const hasBooks = store.get().books.length > 0;
-    openSheet(`${sheetHead('Clubbuch hinzufügen', { action: 'cbSave', actionLabel: 'Hinzufügen' })}
-      <div class="form">
-        ${hasBooks ? `<button class="btn tonal" data-s="mine">${icon('books')}Aus meinen Büchern wählen</button>
-        <p class="hint center">oder neu eintragen:</p>` : ''}
-        <label class="lbl" for="cb-title">Titel</label>
-        <input id="cb-title" class="input" maxlength="120" placeholder="Buchtitel" autocomplete="off">
-        <label class="lbl" for="cb-author">Autor:in</label>
-        <input id="cb-author" class="input" maxlength="80" placeholder="Vorname Nachname" autocomplete="off">
-        <div class="row2">
-          <div><label class="lbl" for="cb-pages">Seiten</label><input id="cb-pages" class="input" inputmode="numeric" placeholder="z. B. 320"></div>
-          <div><label class="lbl" for="cb-start">Beginn</label><input id="cb-start" class="input" type="date" value="${today()}"></div>
-        </div>
-        <div class="list-row"><span>${icon('book')}Auch in meine Bücher <small>als „Lese ich“</small></span>${toggle('cbMine', true)}</div>
-      </div>`, {
-      onMount(root, entry) {
-        let mineToo = true;
-        root.addEventListener('togglechange', e => { mineToo = e.detail.on; });
-        root.addEventListener('click', async e => {
-          if (e.target.closest('[data-s="mine"]')) {
-            closeSheet(entry);
-            setTimeout(() => bookPicker('Aus meinen Büchern', 'Dieses Buch wird zum Clubbuch, und dein Fortschritt erscheint im Rennen.', b => addFromMine(b)), 250);
-            return;
-          }
-          const btn = e.target.closest('[data-act="cbSave"]');
-          if (!btn) return;
-          e.stopPropagation();
-          const title = root.querySelector('#cb-title').value.trim();
-          if (!title) { toast('Bitte einen Titel eintragen', { icon: 'info' }); return; }
-          const author = root.querySelector('#cb-author').value.trim();
-          const total = Number(root.querySelector('#cb-pages').value.replace(/\D/g, '')) || 0;
-          const start = root.querySelector('#cb-start').value || today();
-          const res = await busy(btn, () => club.addClubBook({ title, author, total, status: 'current', start }));
-          if (!res) return;
-          if (mineToo) {
-            let local = store.get().books.find(b => slugify(b.title) === res.slug);
-            if (!local) local = store.addBook({ title, author, totalPages: total, status: 'reading', startedAt: tsOf(start) });
-            club.linkBook(res.slug, local.id);
-          }
-          selected[club.live.code] = res.slug;
-          closeSheet(entry);
-          toast(res.existed ? 'Das Buch gibt es im Club schon' : `„${title}“ ist jetzt Clubbuch`);
-          render();
-        });
-      },
-    });
-  },
+  clubBookAdd() { clubBookForm(null, { status: 'current' }); },
+  clubBookPast() { clubBookForm(null, { status: 'done' }); },
+  clubBookEdit(el) { clubBookForm(el.dataset.slug); },
+  openClubShelf() { nav.push('clubShelf'); },
 
   /** Ich lese ein Clubbuch mit: vorhandenes Exemplar nehmen oder anlegen */
-  clubJoinBook(el) {
+  async clubJoinBook(el) {
     const slug = el.dataset.slug;
-    const b = clubShelf(club.live.books, club.live.members).current.find(x => x.slug === slug);
+    const b = findClubBook(slug);
     if (!b) return;
     let { book } = myCopy(club.info(), slug, b.title);
     if (!book) {
-      book = store.addBook({ title: b.title, author: b.author || '', totalPages: b.total || 0, status: 'reading' });
+      book = store.addBook({ title: b.title, author: b.author || '', totalPages: b.total || 0, isbn: b.isbn || '', blurb: b.blurb || '',
+        status: clubToOwnStatus(b.status), coverId: await localCoverFrom(b) });
       toast(`„${b.title}“ ist jetzt in deinen Büchern`);
     } else {
-      if (book.status === 'want') store.updateBook(book.id, { status: 'reading', startedAt: book.startedAt || Date.now() });
-      toast('Du liest mit');
+      if (book.status === 'want' && b.status === 'current') store.updateBook(book.id, { status: 'reading', startedAt: book.startedAt || Date.now() });
+      toast(b.status === 'want' ? 'Verknüpft' : 'Du liest mit');
     }
     club.linkBook(slug, book.id);
+    closeSheetsFor(slug);
     if (club.isDemo()) render();
   },
 
   clubPickFor(el) {
     const slug = el.dataset.slug;
-    const entry = club.info();
-    bookPicker('Mein Exemplar', 'Wähle das Buch aus deiner Bibliothek, dessen Fortschritt im Rennen erscheinen soll.', b => {
+    bookPicker('Mein Exemplar', 'Wähle das Buch aus deiner Bibliothek, das zu diesem Clubbuch gehört.', b => {
       club.linkBook(slug, b.id);
       toast(`„${b.title}“ verknüpft`);
+      closeSheetsFor(slug);
       if (club.isDemo()) render();
     });
-    void entry;
   },
 
-  /** Clubbuch bearbeiten: Titel, Zeitraum, Status, löschen */
-  clubBookEdit(el) {
-    const slug = el.dataset.slug;
-    const L = club.live;
-    const b = clubShelf(L.books, L.members).current.concat(clubShelf(L.books, L.members).done).find(x => x.slug === slug);
-    if (!b) return;
-    const entry = club.info();
-    const linked = entry && entry.links[slug];
-    const canDelete = club.isAdmin() || b.addedBy === L.uid || b.implicit;
-    let status = b.status === 'done' ? 'done' : 'current';
-    openSheet(`${sheetHead('Clubbuch', { action: 'ceSave', actionLabel: 'Sichern' })}
-      <div class="form">
-        <label class="lbl" for="ce-title">Titel</label>
-        <input id="ce-title" class="input" maxlength="120" value="${esc(b.title)}">
-        <label class="lbl" for="ce-author">Autor:in</label>
-        <input id="ce-author" class="input" maxlength="80" value="${esc(b.author || '')}">
-        <label class="lbl">Status</label>
-        ${segmented('ceStatus', [['current', 'Lesen wir gerade'], ['done', 'Gelesen']], status)}
-        <div class="row2">
-          <div><label class="lbl" for="ce-start">Beginn</label><input id="ce-start" class="input" type="date" value="${esc(b.start || '')}"></div>
-          <div><label class="lbl" for="ce-end">Ende</label><input id="ce-end" class="input" type="date" value="${esc(b.end || '')}"></div>
-        </div>
-        <p class="hint">Beginn und Ende gelten für den ganzen Club. Deine eigenen Daten stellst du in deinem Buch ein.</p>
-        ${linked ? `<button class="btn ghost" data-s="unlink">${icon('close')}Mein Exemplar lösen</button>` : ''}
-        ${canDelete ? `<button class="btn ghost danger" data-s="delete">${icon('trash')}Aus dem Club entfernen</button>` : ''}
-      </div>`, {
-      onMount(root, sheet) {
-        root.addEventListener('segchange', e => {
-          status = e.detail.value;
-          if (status === 'done' && !root.querySelector('#ce-end').value) root.querySelector('#ce-end').value = today();
-        });
-        root.addEventListener('click', async e => {
-          const s = e.target.closest('[data-s]');
-          if (s && s.dataset.s === 'unlink') { club.linkBook(slug, null); closeSheet(sheet); toast('Verknüpfung gelöst'); return; }
-          if (s && s.dataset.s === 'delete') {
-            const ok = await confirmDialog({ title: `„${b.title}“ entfernen?`, text: 'Das Buch verschwindet für alle aus dem Club-Regal. Eure eigenen Bücher bleiben erhalten.', ok: 'Entfernen', danger: true });
-            if (ok && await busy(null, () => club.deleteClubBook(slug).then(() => true))) closeSheet(sheet);
-            return;
-          }
-          const btn = e.target.closest('[data-act="ceSave"]');
-          if (!btn) return;
-          e.stopPropagation();
-          const title = root.querySelector('#ce-title').value.trim();
-          const start = root.querySelector('#ce-start').value || null;
-          const end = root.querySelector('#ce-end').value || null;
-          if (!title) { toast('Bitte einen Titel eintragen', { icon: 'info' }); return; }
-          if (start && end && end < start) { toast('Das Ende liegt vor dem Beginn', { icon: 'info' }); return; }
-          const ok = await busy(btn, () => club.updateClubBook(slug, { ...b, title, author: root.querySelector('#ce-author').value.trim(), status, start, end }).then(() => true));
-          if (ok) { closeSheet(sheet); toast(status === 'done' && b.status !== 'done' ? 'Ins Regal gestellt' : 'Gespeichert'); }
-        });
-      },
-    });
-  },
-
-  /* ----- Regal: gelesene Bücher ----- */
-
-  /** Gemeinsam gelesenes Buch nachtragen und bewerten */
-  clubBookPast() {
-    let stars = 0, mineToo = true;
-    openSheet(`${sheetHead('Gelesenes Buch nachtragen', { action: 'cpSave', actionLabel: 'Sichern' })}
-      <div class="form">
-        <label class="lbl" for="cp-title">Titel</label>
-        <input id="cp-title" class="input" maxlength="120" placeholder="Buchtitel" autocomplete="off">
-        <label class="lbl" for="cp-author">Autor:in</label>
-        <input id="cp-author" class="input" maxlength="80" placeholder="Vorname Nachname" autocomplete="off">
-        <div class="row2">
-          <div><label class="lbl" for="cp-start">Gelesen von</label><input id="cp-start" class="input" type="date" max="${today()}"></div>
-          <div><label class="lbl" for="cp-end">bis</label><input id="cp-end" class="input" type="date" max="${today()}" value="${today()}"></div>
-        </div>
-        <label class="lbl" for="cp-pages">Seiten <small>(optional)</small></label>
-        <input id="cp-pages" class="input" inputmode="numeric" placeholder="z. B. 320">
-        <label class="lbl center">Deine Bewertung</label>
-        ${starsInput('cpStars', 0, true)}
-        <div class="list-row"><span>${icon('book')}Auch in meine Bücher <small>als gelesen</small></span>${toggle('cpMine', true)}</div>
-        <p class="hint">Die anderen sehen das Buch im Regal und können ihre eigenen Sterne vergeben.</p>
-      </div>`, {
-      tall: true,
-      onMount(root, entry) {
-        root.addEventListener('starchange', e => { stars = e.detail.value; });
-        root.addEventListener('togglechange', e => { mineToo = e.detail.on; });
-        root.querySelector('[data-act="cpSave"]').addEventListener('click', async e => {
-          e.stopPropagation();
-          const title = root.querySelector('#cp-title').value.trim();
-          const author = root.querySelector('#cp-author').value.trim();
-          const start = root.querySelector('#cp-start').value || null;
-          const end = root.querySelector('#cp-end').value || null;
-          const total = Number(root.querySelector('#cp-pages').value.replace(/\D/g, '')) || 0;
-          if (!title) { toast('Bitte einen Titel eintragen', { icon: 'info' }); return; }
-          if (start && end && end < start) { toast('Das Ende liegt vor dem Beginn', { icon: 'info' }); return; }
-          const res = await busy(e.currentTarget, () => club.addClubBook({ title, author, total, status: 'done', start, end }));
-          if (!res) return;
-          if (res.existed) await busy(null, () => club.updateClubBook(res.slug, { title, author, total, status: 'done', start, end }));
-          if (mineToo) {
-            let local = store.get().books.find(b => slugify(b.title) === res.slug);
-            if (!local) {
-              local = store.addBook({ title, author, totalPages: total, currentPage: total, status: 'finished',
-                startedAt: tsOf(start), finishedAt: tsOf(end) || Date.now(), rating: stars ? { overall: stars } : null });
-            } else if (stars) {
-              store.updateBook(local.id, { rating: { ...(local.rating || {}), overall: stars } });
-            }
-            club.linkBook(res.slug, local.id);
-            if (stars && local.status !== 'finished') club.setClubRating(res.slug, stars);
-          } else if (stars) club.setClubRating(res.slug, stars);
-          closeSheet(entry);
-          toast('Im Regal eingetragen', { icon: 'books' });
-          render();
-        });
-      },
-    });
-  },
-
-  /** Gelesenes Clubbuch: Sterne aller und eigene Bewertung */
+  /** Clubbuch ansehen: Cover, Infos, Sterne aller, eigene Bewertung, Aktionen */
   clubBookDetail(el) {
     const slug = el.dataset.slug;
     const L = club.live;
-    const b = clubShelf(L.books, L.members).done.find(x => x.slug === slug);
+    const b = findClubBook(slug);
     if (!b) return;
     const entry = club.info();
     const sum = ratingSummary(L.members, slug);
     const { book: mine, linked } = myCopy(entry, slug, b.title);
-    const mineRating = myRating(entry, slug);
+    const readers = L.members.filter(m => memberBooks(m)[slug]);
+    const canRate = b.status === 'done' || (linked && mine.status === 'finished');
     openSheet(`
-      <div class="cbd-head">${coverHtml(fakeBook(b), 'm')}
-        <div><h2>${esc(b.title)}</h2><p>${esc(b.author || '')}</p><small>${esc(fmtSpan(b.start, b.end))}</small></div></div>
+      <div class="cbd-head" data-detail="${esc(slug)}">
+        <button class="cbd-cover" data-s="cover" aria-label="Cover ändern">${b.cover ? clubCover(b, 'm') : clubCover(b, 'm', linked ? mine : null)}
+          <span class="cbd-cover-btn">${icon('camera')}${b.cover ? 'Ändern' : 'Cover'}</span></button>
+        <div><span class="badge">${esc(CLUB_STATUS[b.status] || 'Lesen wir')}</span><h2>${esc(b.title)}</h2><p>${esc(b.author || '')}</p>
+          <small>${esc([fmtSpan(b.start, b.end), b.total ? `${pageTxt(b.total)} Seiten` : ''].filter(Boolean).join(' · '))}</small></div></div>
+      ${b.blurb ? `<p class="cbd-blurb">${esc(b.blurb)}</p>` : ''}
+      ${b.status !== 'want' && readers.length ? `<p class="hint">${b.status === 'done' ? 'Gelesen von' : 'Lesen mit'}: ${esc(readers.map(m => m.uid === L.uid ? 'du' : m.name).join(', '))}</p>` : ''}
+      ${b.status === 'done' || sum.count ? `
       <div class="avg-box">
         ${sum.avg ? `<strong>${fmtNum(sum.avg, 1)}</strong>${starsView(sum.avg, 'lg')}<small>Club-Durchschnitt aus ${sum.count} ${sum.count === 1 ? 'Bewertung' : 'Bewertungen'}</small>`
           : '<small>Noch keine Bewertungen</small>'}
       </div>
       ${sum.list.length ? `<div class="rating-list">${sum.list.map(r => `
         <div class="v-head"><span class="avatar xs" style="--av:var(--${hue(r.uid)})">${initial(r.name)}</span>
-          <div><strong>${esc(r.name)}${r.uid === L.uid ? ' <small>(du)</small>' : ''}</strong></div>${starsView(r.rating)}</div>`).join('')}</div>` : ''}
-      <label class="lbl center">Deine Bewertung</label>
-      ${starsInput('myStars', mineRating, true)}
-      ${!mine ? `<button class="btn tonal" data-s="addMine">${icon('plus')}In meine Bücher als gelesen</button>` : !linked ? `<button class="btn tonal" data-s="link">${icon('check')}Mit „${esc(mine.title)}“ verknüpfen</button>` : ''}
-      <button class="btn ghost" data-s="edit">${icon('edit')}Buch und Zeitraum bearbeiten</button>`, {
+          <div><strong>${esc(r.name)}${r.uid === L.uid ? ' <small>(du)</small>' : ''}</strong></div>${starsView(r.rating)}</div>`).join('')}</div>` : ''}` : ''}
+      ${canRate ? `<label class="lbl center">Deine Bewertung</label>${starsInput('myStars', myRating(entry, slug), true)}` : ''}
+      <div class="cbd-actions">
+        ${linked ? `<p class="my-line">${icon('check')}In deinen Büchern${mine.status === 'reading' ? ` · Seite ${pageTxt(mine.currentPage)}` : ''}</p>`
+          : mine ? `<button class="btn primary" data-act="clubJoinBook" data-slug="${esc(slug)}">${icon('check')}Mit „${esc(mine.title)}“ verknüpfen</button>`
+          : `<button class="btn primary" data-act="clubJoinBook" data-slug="${esc(slug)}">${icon('plus')}${b.status === 'done' ? 'In meine Bücher (gelesen)' : b.status === 'want' ? 'Auf meine Wunschliste' : 'Lese ich auch'}</button>`}
+        ${b.status === 'want' ? `<button class="btn tonal" data-s="start">${icon('play')}Das lesen wir jetzt</button>` : ''}
+        <button class="btn ghost" data-act="clubBookEdit" data-slug="${esc(slug)}">${icon('edit')}Bearbeiten</button>
+      </div>`, {
       onMount(root, sheet) {
+        hydratePhotos(root);
         root.addEventListener('starchange', e => {
           const v = e.detail.value;
           const cur = myCopy(club.info(), slug, b.title);
@@ -780,18 +625,30 @@ Object.assign(A, {
           else club.setClubRating(slug, v);
           toast(v ? 'Bewertung gespeichert' : 'Bewertung entfernt', { icon: 'star' });
         });
-        root.addEventListener('click', e => {
-          const s = e.target.closest('[data-s]');
-          if (!s) return;
-          if (s.dataset.s === 'edit') { closeSheet(sheet); setTimeout(() => A.clubBookEdit({ dataset: { slug } }), 250); return; }
-          if (s.dataset.s === 'link') { club.linkBook(slug, mine.id); closeSheet(sheet); toast('Verknüpft'); return; }
-          if (s.dataset.s === 'addMine') {
-            const r = myRating(club.info(), slug);
-            const nb = store.addBook({ title: b.title, author: b.author || '', totalPages: b.total || 0, currentPage: b.total || 0, status: 'finished',
-              startedAt: tsOf(b.start), finishedAt: tsOf(b.end) || Date.now(), rating: r ? { overall: r } : null });
-            club.linkBook(slug, nb.id);
-            closeSheet(sheet);
-            toast(`„${b.title}“ ist jetzt in deinen Büchern`);
+        root.addEventListener('click', async e => {
+          if (e.target.closest('[data-act="clubBookEdit"]')) { e.stopPropagation(); closeSheet(sheet); setTimeout(() => clubBookForm(slug), 250); return; }
+          const cv = e.target.closest('[data-s="cover"]');
+          if (cv) {
+            // Cover direkt hier hinzufügen oder ändern – sehen alle im Club
+            const file = await pickFile('image/*');
+            if (!file) return;
+            const ok = await busy(cv, async () => {
+              const cover = await club.coverFromFile(file);
+              await club.updateClubBook(slug, { ...(findClubBook(slug) || b), cover });
+              cv.querySelector('.cover').outerHTML = `<div class="cover cover-m"><img class="loaded" alt="" src="${cover}"></div>`;
+              cv.querySelector('.cbd-cover-btn').lastChild.textContent = 'Ändern';
+              // Eigenes verknüpftes Buch ohne Foto bekommt das Cover auch
+              const cur = myCopy(club.info(), slug, b.title);
+              if (cur.linked && !cur.book.coverId) store.updateBook(cur.book.id, { coverId: await store.putPhoto(await store.resizeImage(file, 900)) });
+              return true;
+            });
+            if (ok) toast('Cover gespeichert – alle im Club sehen es', { icon: 'camera' });
+            return;
+          }
+          const s = e.target.closest('[data-s="start"]');
+          if (s) {
+            const ok = await busy(s, () => club.updateClubBook(slug, { ...b, status: 'current', start: b.start || today() }).then(() => true));
+            if (ok) { selected[club.live.code] = slug; closeSheet(sheet); toast(`„${b.title}“ lest ihr jetzt`); }
           }
         });
       },
@@ -848,19 +705,6 @@ Object.assign(A, {
 
   clubQuotesMore() { showAllQuotes = !showAllQuotes; render(); },
 });
-
-/** Bestehendes eigenes Buch zum Clubbuch machen */
-async function addFromMine(b) {
-  const start = b.startedAt ? dayKey(b.startedAt) : today();
-  const res = await busy(null, () => club.addClubBook({ title: b.title, author: b.author || '', total: b.totalPages || 0,
-    status: b.status === 'finished' ? 'done' : 'current', start, end: b.status === 'finished' && b.finishedAt ? dayKey(b.finishedAt) : null }));
-  if (!res) return;
-  club.linkBook(res.slug, b.id);
-  if (b.status === 'want') store.updateBook(b.id, { status: 'reading', startedAt: b.startedAt || Date.now() });
-  selected[club.live.code] = res.slug;
-  toast(res.existed ? 'Mit dem vorhandenen Clubbuch verknüpft' : `„${b.title}“ ist jetzt Clubbuch`);
-  render();
-}
 
 /** Eigene Zitate im Club teilen */
 async function shareQuotes(quotes) {
@@ -920,10 +764,12 @@ function pickOwnQuotes() {
       const btn = root.querySelector('[data-share]');
       const update = () => {
         list.innerHTML = listHtml();
+        hydratePhotos(list);
         btn.disabled = !chosen.size;
         btn.querySelector('span').textContent = chosen.size ? (chosen.size === 1 ? '1 Zitat teilen' : `${chosen.size} Zitate teilen`) : 'Zitate auswählen';
       };
-      root.querySelector('#pq-term').addEventListener('input', e => { term = e.target.value; list.innerHTML = listHtml(); });
+      root.querySelector('#pq-term').addEventListener('input', e => { term = e.target.value; list.innerHTML = listHtml(); hydratePhotos(list); });
+      hydratePhotos(list);
       root.addEventListener('click', async e => {
         const q = e.target.closest('[data-qid]');
         if (q && !q.disabled) { chosen.has(q.dataset.qid) ? chosen.delete(q.dataset.qid) : chosen.add(q.dataset.qid); update(); return; }
@@ -941,6 +787,278 @@ function pickOwnQuotes() {
           await shareQuotes(qs);
         }
       });
+    },
+  });
+}
+
+/* ---------- Hilfen für Clubbücher ---------- */
+
+/** Cover eines Clubbuchs: eigenes Foto (falls verknüpft), sonst Club-Cover, sonst buntes Cover */
+function clubCover(b, size, mine = null) {
+  if (mine && mine.coverId) return coverHtml(mine, size);
+  if (b.cover) return `<div class="cover cover-${size}"><img class="loaded" alt="" src="${b.cover}"></div>`;
+  return coverHtml(fakeBook(b), size);
+}
+
+function findClubBook(slug) {
+  const s = clubShelf(club.live.books, club.live.members);
+  return [...s.current, ...s.want, ...s.done].find(x => x.slug === slug) || null;
+}
+
+/** Club-Cover als eigenes Foto speichern (für Bücher, die man aus dem Club übernimmt) */
+async function localCoverFrom(b) {
+  if (!b || !b.cover) return null;
+  try { return await store.putPhoto(await (await fetch(b.cover)).blob()); } catch (e) { return null; }
+}
+
+function closeSheetsFor() { closeAllSheets(); }
+
+/** Kachel im Club auf der Club-Seite: Regal mit Zahlen und kleinen Covern */
+function shelfTeaser(shelf) {
+  const all = [...shelf.current, ...shelf.want, ...shelf.done];
+  const n = (k, one, many) => `${shelf[k].length} ${shelf[k].length === 1 ? one : many}`;
+  return `<button class="card shelf-teaser" data-act="openClubShelf">
+    <div class="st-covers">${all.slice(0, 5).map(b => clubCover(b, 'xs')).join('') || `<span class="st-empty">${icon('books')}</span>`}</div>
+    <div class="st-txt"><strong>Unser Regal</strong>
+      <small>${[n('current', 'lesen wir', 'lesen wir'), n('want', 'Wunsch', 'Wünsche'), n('done', 'gelesen', 'gelesen')].join(' · ')}</small></div>
+    ${icon('chevronRight')}
+  </button>`;
+}
+
+/* ---------- Seite „Unser Regal“ (wie „Bücher“, nur für den Club) ---------- */
+
+let shelfFilter = 'current';
+let shelfSearch = '';
+
+VIEWS.clubShelf = {
+  render(params, onlyResults = false) {
+    const L = club.live;
+    const shelf = clubShelf(L.books, L.members);
+    const entry = club.info();
+    const s = shelfSearch.trim().toLowerCase();
+    let list = shelf[shelfFilter] || [];
+    if (s) list = [...shelf.current, ...shelf.want, ...shelf.done].filter(b => `${b.title} ${b.author || ''}`.toLowerCase().includes(s));
+    const opts = [['current', 'Lesen wir'], ['want', 'Wunsch'], ['done', 'Gelesen']];
+    const header = `
+    <header class="page-head sub"><button class="back" data-act="back">${icon('chevronLeft')}Club</button></header>
+    <header class="page-head">
+      <div><p class="eyebrow">${esc((L.group && L.group.name) || 'Buchclub')}</p><h1>Unser Regal</h1></div>
+      <div class="head-btns"><button class="round accent" data-act="shelfAdd" aria-label="Clubbuch hinzufügen">${icon('plus')}</button></div>
+    </header>
+    <div class="search">${icon('search')}<input id="shelf-search" class="input" type="search" placeholder="Titel oder Autor:in suchen" value="${esc(shelfSearch)}"></div>`;
+    const results = `
+    ${s ? '' : segmented('shelfFilter', opts.map(([v, l]) => [v, `${l} ${shelf[v].length || ''}`.trim()]), shelfFilter)}
+    ${s || !list.length ? '' : `<button class="btn tonal shelf-add" data-act="shelfAdd">${icon('plus')}${{ current: 'Clubbuch hinzufügen', want: 'Wunschbuch hinzufügen', done: 'Gelesenes Buch nachtragen' }[shelfFilter]}</button>`}
+    ${list.length ? `<div class="book-grid">${list.map(b => {
+      const { book: mine, linked } = myCopy(entry, b.slug, b.title);
+      const sum = ratingSummary(L.members, b.slug);
+      const readers = L.members.filter(m => memberBooks(m)[b.slug]).length;
+      const sub = b.status === 'done' ? (sum.avg ? `${starsView(sum.avg, 'xs')} <span class="bt-avg">${fmtNum(sum.avg, 1)}</span>` : esc(b.author || ''))
+        : b.status === 'want' ? esc(b.author || '') : `${readers} ${readers === 1 ? 'liest' : 'lesen'} mit`;
+      return `<button class="book-tile" data-act="clubBookDetail" data-slug="${esc(b.slug)}">
+        <div class="bt-cover">${clubCover(b, 'l', linked ? mine : null)}${linked ? `<span class="bt-mine">${icon('check')}</span>` : ''}</div>
+        <strong>${esc(b.title)}</strong>
+        <small>${sub}</small>
+      </button>`;
+    }).join('')}</div>` : `
+      <div class="empty">${icon(s ? 'search' : 'books')}<p>${s ? 'Nichts gefunden.' : {
+        current: 'Gerade lest ihr kein Buch. Lege eines an oder nimm eines von der Wunschliste.',
+        want: 'Eure Wunschliste ist leer. Hier sammelt ihr Bücher, die ihr gemeinsam lesen wollt.',
+        done: 'Noch nichts im Regal. Trage Bücher nach, die ihr schon gemeinsam gelesen habt.',
+      }[shelfFilter]}</p>${s ? '' : `<button class="btn tonal" data-act="shelfAdd">${icon('plus')}${{ current: 'Clubbuch hinzufügen', want: 'Wunschbuch hinzufügen', done: 'Gelesenes Buch nachtragen' }[shelfFilter]}</button>`}</div>`}`;
+    return onlyResults ? results : header + `<div id="shelf-results">${results}</div>`;
+  },
+  mount(root) {
+    const input = root.querySelector('#shelf-search');
+    input.addEventListener('input', () => {
+      shelfSearch = input.value;
+      const box = root.querySelector('#shelf-results');
+      box.innerHTML = VIEWS.clubShelf.render({}, true);
+      hydratePhotos(box);
+    });
+    root.addEventListener('segchange', e => { if (e.detail.name === 'shelfFilter') { shelfFilter = e.detail.value; render(); } });
+  },
+};
+
+A.shelfAdd = () => clubBookForm(null, { status: shelfFilter });
+
+/* ---------- Clubbuch anlegen / bearbeiten (aufgebaut wie „Buch hinzufügen“) ---------- */
+
+function clubBookForm(slug = null, preset = {}) {
+  const existing = slug ? findClubBook(slug) : null;
+  const entry = club.info();
+  const b = existing ? { ...existing } : { title: '', author: '', total: '', isbn: '', blurb: '', status: 'current', start: today(), end: null, cover: '', ...preset };
+  if (!existing && b.status === 'done') { b.start = null; b.end = today(); }
+  if (!existing && b.status === 'want') b.start = null;
+  const hasBooks = store.get().books.length > 0;
+  const linkedId = existing && entry && entry.links[slug];
+  let status = b.status || 'current';
+  let cover = b.cover || '';          // Club-Cover (Bild-Text)
+  let photoBlob = null;               // Foto für das eigene Buch
+  let fromLocal = null;               // eigenes Buch, aus dem übernommen wurde
+  let stars = existing ? myRating(entry, slug) : 0;
+  let mineToo = true;
+
+  const html = `
+    ${sheetHead(existing ? 'Clubbuch bearbeiten' : status === 'done' ? 'Gelesenes Buch nachtragen' : status === 'want' ? 'Wunschbuch hinzufügen' : 'Clubbuch hinzufügen', { action: 'cfSave', actionLabel: 'Sichern' })}
+    <div class="form">
+      ${!existing && hasBooks ? `<button class="btn tonal" data-s="mine">${icon('books')}Aus meinen Büchern übernehmen</button>` : ''}
+      <div class="photo-row single">
+        <button class="photo-slot" data-s="photo">${cover ? `<img class="loaded" alt="" src="${cover}">` : `<span class="ps-empty">${icon('camera')}<small>Cover hinzufügen</small></span>`}</button>
+        <div class="photo-actions">
+          <button class="btn tonal" data-s="scan">${icon('barcode')}ISBN scannen</button>
+          <p class="hint">Das Cover sehen alle im Club. Titel und Autor:in werden vom Foto gelesen.</p>
+        </div>
+      </div>
+      <div class="ocr-status" hidden></div>
+      <label class="lbl" for="cf-title">Titel</label>
+      <input id="cf-title" class="input" maxlength="120" value="${esc(b.title)}" placeholder="Buchtitel" autocomplete="off">
+      <label class="lbl" for="cf-author">Autor:in</label>
+      <input id="cf-author" class="input" maxlength="80" value="${esc(b.author || '')}" placeholder="Vorname Nachname" autocomplete="off">
+      <div class="row2">
+        <div><label class="lbl" for="cf-pages">Seiten</label><input id="cf-pages" class="input" inputmode="numeric" value="${b.total || ''}" placeholder="z. B. 320"></div>
+        <div><label class="lbl" for="cf-isbn">ISBN</label><input id="cf-isbn" class="input" inputmode="numeric" value="${esc(b.isbn ? fmtIsbn(b.isbn) : '')}" placeholder="978-…"></div>
+      </div>
+      <label class="lbl">Status im Club</label>
+      ${segmented('cfStatus', [['current', 'Lesen wir'], ['want', 'Wunsch'], ['done', 'Gelesen']], status)}
+      <div class="row2">
+        <div class="cf-start" ${status === 'want' ? 'hidden' : ''}><label class="lbl" for="cf-start">Beginn</label><input id="cf-start" class="input" type="date" value="${esc(b.start || '')}"></div>
+        <div class="cf-end" ${status === 'done' ? '' : 'hidden'}><label class="lbl" for="cf-end">Ende</label><input id="cf-end" class="input" type="date" value="${esc(b.end || '')}"></div>
+      </div>
+      <div class="cf-stars" ${status === 'done' ? '' : 'hidden'}>
+        <label class="lbl center">Deine Bewertung</label>
+        ${starsInput('cfStars', stars, true)}
+      </div>
+      <label class="lbl" for="cf-blurb">Klappentext <small>(optional)</small></label>
+      <textarea id="cf-blurb" class="input" rows="3" maxlength="1500" placeholder="Worum geht es?">${esc(b.blurb || '')}</textarea>
+      ${!existing ? `<div class="list-row cf-mine"><span>${icon('book')}Auch in meine Bücher <small class="cf-mine-hint"></small></span>${toggle('cfMine', true)}</div>` : ''}
+      ${linkedId ? `<button class="btn ghost" data-s="unlink">${icon('close')}Mein Exemplar lösen</button>` : ''}
+      ${existing && (club.isAdmin() || existing.addedBy === club.live.uid || existing.implicit) ? `<button class="btn ghost danger" data-s="delete">${icon('trash')}Aus dem Club entfernen</button>` : ''}
+    </div>`;
+
+  openSheet(html, {
+    tall: true,
+    onMount(root, sheet) {
+      const $ = s => root.querySelector(s);
+      const ocrStatus = $('.ocr-status');
+      const showStatus = t => { ocrStatus.hidden = !t; ocrStatus.innerHTML = t ? `<span class="spinner"></span>${esc(t)}` : ''; };
+      const mineHint = () => { const h = $('.cf-mine-hint'); if (h) h.textContent = { current: 'als „Lese ich“', want: 'auf die Wunschliste', done: 'als gelesen' }[status]; };
+      const showStatusFields = () => {
+        $('.cf-start').hidden = status === 'want';
+        $('.cf-end').hidden = status !== 'done';
+        $('.cf-stars').hidden = status !== 'done';
+        if (status === 'done' && !$('#cf-end').value) $('#cf-end').value = today();
+        mineHint();
+      };
+      mineHint();
+      const setCover = (dataUrl) => { cover = dataUrl; $('[data-s="photo"]').innerHTML = `<img class="loaded" alt="" src="${dataUrl}">`; };
+
+      root.addEventListener('segchange', e => { if (e.detail.name === 'cfStatus') { status = e.detail.value; showStatusFields(); } });
+      root.addEventListener('starchange', e => { stars = e.detail.value; });
+      root.addEventListener('togglechange', e => { mineToo = e.detail.on; });
+
+      root.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-s], [data-act="cfSave"]');
+        if (!btn) return;
+        if (btn.dataset.act === 'cfSave') { e.stopPropagation(); return save(btn); }
+        const s = btn.dataset.s;
+        if (s === 'mine') {
+          bookPicker('Aus meinen Büchern', 'Die Angaben und das Cover werden übernommen.', async lb => {
+            fromLocal = lb.id;
+            $('#cf-title').value = lb.title; $('#cf-author').value = lb.author || '';
+            $('#cf-pages').value = lb.totalPages || ''; $('#cf-isbn').value = lb.isbn ? fmtIsbn(lb.isbn) : '';
+            $('#cf-blurb').value = lb.blurb || '';
+            status = ownToClubStatus(lb.status);
+            root.querySelectorAll('.seg [data-name="cfStatus"]').forEach(x => x.classList.toggle('on', x.dataset.value === status));
+            $('#cf-start').value = lb.startedAt ? dayKey(lb.startedAt) : '';
+            $('#cf-end').value = lb.status === 'finished' && lb.finishedAt ? dayKey(lb.finishedAt) : '';
+            if (lb.rating && lb.rating.overall) stars = lb.rating.overall;
+            showStatusFields();
+            const row = $('.cf-mine'); if (row) row.hidden = true;
+            if (lb.coverId) {
+              const blob = await store.getPhoto(lb.coverId);
+              if (blob) setCover(await club.coverFromFile(blob));
+            }
+            toast('Angaben übernommen');
+          });
+        } else if (s === 'photo') {
+          const file = await pickFile('image/*');
+          if (!file) return;
+          try {
+            setCover(await club.coverFromFile(file));
+            photoBlob = await store.resizeImage(file, 900);
+            showStatus('Lese Titel vom Cover …');
+            const res = await ocrCover(file, showStatus);
+            if (!$('#cf-title').value.trim() && res.title) $('#cf-title').value = res.title;
+            if (!$('#cf-author').value.trim() && res.author) $('#cf-author').value = res.author;
+          } catch (err) { toast(err.message || 'Foto konnte nicht gelesen werden', { icon: 'info' }); }
+          finally { showStatus(''); }
+        } else if (s === 'scan') {
+          const isbn = await scanIsbn().catch(err => { toast(err.message, { icon: 'info' }); return null; });
+          if (isbn) {
+            $('#cf-isbn').value = fmtIsbn(isbn);
+            const own = store.get().books.find(x => x.isbn === isbn);
+            if (own && !$('#cf-title').value.trim()) { $('#cf-title').value = own.title; $('#cf-author').value = own.author || ''; toast(`„${own.title}“ aus deinen Büchern erkannt`); }
+            else toast('ISBN erkannt');
+          }
+        } else if (s === 'unlink') {
+          club.linkBook(slug, null); closeSheet(sheet); toast('Verknüpfung gelöst');
+        } else if (s === 'delete') {
+          const ok = await confirmDialog({ title: `„${existing.title}“ entfernen?`, text: 'Das Buch verschwindet für alle aus dem Club-Regal. Eure eigenen Bücher bleiben erhalten.', ok: 'Entfernen', danger: true });
+          if (ok && await busy(null, () => club.deleteClubBook(slug).then(() => true))) { closeSheet(sheet); toast('Entfernt', { icon: 'trash' }); }
+        }
+      });
+
+      async function save(btn) {
+        const title = $('#cf-title').value.trim();
+        if (!title) { $('#cf-title').focus(); toast('Bitte einen Titel eintragen', { icon: 'info' }); return; }
+        const isbnRaw = $('#cf-isbn').value.trim();
+        const isbn = isbnRaw ? normalizeIsbn(isbnRaw) : '';
+        if (isbnRaw && !isbn) { toast('Die ISBN ist ungültig', { icon: 'info' }); return; }
+        const start = status === 'want' ? null : ($('#cf-start').value || null);
+        const end = status === 'done' ? ($('#cf-end').value || null) : null;
+        if (start && end && end < start) { toast('Das Ende liegt vor dem Beginn', { icon: 'info' }); return; }
+        const fields = { title, author: $('#cf-author').value.trim(), total: Number($('#cf-pages').value.replace(/\D/g, '')) || 0,
+          isbn: isbn || '', blurb: $('#cf-blurb').value.trim(), status, start, end, cover };
+
+        let theSlug = slug;
+        if (existing) {
+          const ok = await busy(btn, () => club.updateClubBook(slug, { ...existing, ...fields }).then(() => true));
+          if (!ok) return;
+        } else {
+          const res = await busy(btn, () => club.addClubBook(fields));
+          if (!res) return;
+          theSlug = res.slug;
+          if (res.existed) {
+            const old = findClubBook(res.slug) || {};
+            await busy(null, () => club.updateClubBook(res.slug, { ...old, ...fields, cover: cover || old.cover || '' }));
+          }
+          // Eigenes Exemplar verknüpfen oder anlegen
+          let local = fromLocal ? store.book(fromLocal) : null;
+          if (!local && mineToo) {
+            local = store.get().books.find(x => slugify(x.title) === res.slug) || null;
+            if (!local) {
+              const coverId = photoBlob ? await store.putPhoto(photoBlob) : await localCoverFrom({ cover });
+              local = store.addBook({ title, author: fields.author, totalPages: fields.total, isbn: fields.isbn, blurb: fields.blurb, coverId,
+                status: clubToOwnStatus(status), startedAt: start ? keepTime(start) : null,
+                finishedAt: status === 'done' ? (end ? keepTime(end) : Date.now()) : null,
+                currentPage: status === 'done' ? fields.total : 0,
+                rating: status === 'done' && stars ? { overall: stars } : null });
+            }
+          }
+          if (local) club.linkBook(theSlug, local.id);
+        }
+        // Sterne: beim eigenen gelesenen Buch speichern, sonst als Club-Bewertung
+        if (status === 'done' && stars) {
+          const cur = myCopy(club.info(), theSlug, title);
+          if (cur.linked && cur.book.status === 'finished') store.updateBook(cur.book.id, { rating: { ...(cur.book.rating || {}), overall: stars } });
+          else club.setClubRating(theSlug, stars);
+        }
+        if (status === 'current') selected[club.live.code] = theSlug;
+        closeSheet(sheet);
+        toast(existing ? 'Gespeichert' : `„${title}“ ist im Club-Regal`, { icon: 'books' });
+        render();
+      }
     },
   });
 }
