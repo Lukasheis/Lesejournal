@@ -30,7 +30,9 @@ function emit() {
   if (!demo && live.code && live.group) {
     try {
       const all = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-      all[live.code] = { group: live.group, members: live.members, hearts: live.hearts, quotes: live.quotes, books: live.books, uid: live.uid, updatedAt: live.updatedAt };
+      // Cover nicht zwischenspeichern (zu groß für den Offline-Speicher)
+      const books = live.books.map(({ cover, ...b }) => b);
+      all[live.code] = { group: live.group, members: live.members, hearts: live.hearts, quotes: live.quotes, books, uid: live.uid, updatedAt: live.updatedAt };
       localStorage.setItem(CACHE_KEY, JSON.stringify(all));
     } catch (e) { /* egal */ }
   }
@@ -352,9 +354,13 @@ const bookDoc = f => ({
   title: String(f.title || '').trim().slice(0, 120),
   author: String(f.author || '').trim().slice(0, 80),
   total: Number(f.total) || 0,
-  status: f.status === 'done' ? 'done' : 'current',
+  status: f.status === 'done' || f.status === 'want' ? f.status : 'current',
   start: f.start || null,
   end: f.end || null,
+  isbn: String(f.isbn || '').slice(0, 13),
+  blurb: String(f.blurb || '').trim().slice(0, 1500),
+  // Kleines Cover als Bild-Text (data:image/jpeg…), damit alle es sehen – ohne kostenpflichtigen Speicher
+  cover: typeof f.cover === 'string' && f.cover.startsWith('data:image/') && f.cover.length < 240000 ? f.cover : '',
 });
 
 /** Clubbuch anlegen (gibt es den Titel schon, wird das vorhandene genommen) */
@@ -430,3 +436,9 @@ export const shareQuotes = guard(async quotes => {
 });
 
 export const deleteClubQuote = guard(async id => { await (await connect()).deleteQuote(live.code, id); });
+
+/** Foto → kleines Cover als Bild-Text für den Club (ca. 20–40 KB) */
+export async function coverFromFile(fileOrBlob) {
+  const blob = await store.resizeImage(fileOrBlob, 360, 0.72);
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+}
